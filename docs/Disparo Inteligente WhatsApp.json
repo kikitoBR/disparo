@@ -1,0 +1,196 @@
+{
+  "name": "Disparo Inteligente WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Disparador de Mensagens WhatsApp",
+        "formDescription": "Cole a lista de números e defina a mensagem para envio.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Lista de Números (um por linha)",
+              "fieldType": "textarea",
+              "placeholder": "5522999998888\n5521988887777\n22977776666",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Mensagem a ser enviada",
+              "fieldType": "textarea",
+              "placeholder": "Olá! Tudo bem? Passando para avisar...",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Intervalo Mínimo (segundos)",
+              "fieldType": "number",
+              "defaultValue": 15
+            },
+            {
+              "fieldLabel": "Intervalo Máximo (segundos)",
+              "fieldType": "number",
+              "defaultValue": 40
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        176,
+        -112
+      ],
+      "id": "a18acd74-29e2-4ff4-b652-b5d8ab659122",
+      "name": "Formulário de Disparo",
+      "webhookId": "bae173ba-0416-441f-837f-48b7780dc39a"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst rawNumbers = input['Lista de Números (um por linha)'] || '';\nconst mensagem = input['Mensagem a ser enviada'] || '';\nconst delayMin = parseInt(input['Intervalo Mínimo (segundos)']) || 15;\nconst delayMax = parseInt(input['Intervalo Máximo (segundos)']) || 40;\n\n// Separa por quebra de linha\nconst linhas = rawNumbers.split('\\n');\nconst listaFormatada = [];\n\nlinhas.forEach(linha => {\n  // Remove tudo que não for dígito\n  let numero = linha.replace(/\\D/g, '');\n  \n  if (numero.length >= 10) {\n    // Se não tiver DDD/DDI 55, adiciona\n    if (numero.length === 10 || numero.length === 11) {\n      numero = '55' + numero;\n    }\n    \n    // Gera um tempo de espera aleatório entre Min e Max para CADA número\n    const delaySorteado = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin;\n    \n    listaFormatada.push({\n      json: {\n        numero: numero,\n        mensagem: mensagem,\n        delaySegundos: delaySorteado\n      }\n    });\n  }\n});\n\nreturn listaFormatada;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -112
+      ],
+      "id": "ff3ccb4b-7802-49dd-abe4-559e5cecc8ea",
+      "name": "Tratar Números & Delays"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        624,
+        -112
+      ],
+      "id": "655e62c1-82f8-4472-8a40-19c7bab27253",
+      "name": "Loop (1 por vez)"
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.delaySegundos }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        848,
+        -112
+      ],
+      "id": "b44fa683-a846-4cfb-86d7-3a8cadda1304",
+      "name": "Aguardar Delay Aleatório",
+      "webhookId": "wait-delay-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://evo.kikito.site/message/sendText/teste",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "44434241Mm."
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $json.numero }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.mensagem }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1056,
+        -112
+      ],
+      "id": "1a1a7015-1e17-4b36-8564-9a5463ae38c8",
+      "name": "Evolution API (Enviar)"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Formulário de Disparo": {
+      "main": [
+        [
+          {
+            "node": "Tratar Números & Delays",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tratar Números & Delays": {
+      "main": [
+        [
+          {
+            "node": "Loop (1 por vez)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop (1 por vez)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Aguardar Delay Aleatório",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar Delay Aleatório": {
+      "main": [
+        [
+          {
+            "node": "Evolution API (Enviar)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evolution API (Enviar)": {
+      "main": [
+        [
+          {
+            "node": "Loop (1 por vez)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "dba0d5a9-8230-4194-b556-65cf9c7cfb71",
+  "meta": {
+    "instanceId": "154384b25d29bfb3636f0f95202d1168481391e27b174186ccbd4aaa88280e7d"
+  },
+  "nodeGroups": [],
+  "id": "VU4P19YcLPqdrELB",
+  "tags": []
+}
