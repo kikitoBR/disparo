@@ -107,9 +107,54 @@ export async function POST(request: NextRequest) {
   });
 }
 
-// PUT /api/contacts — Atualiza contato existente por ID
+// PUT /api/contacts — Atualiza contato (individual, em massa por IDs ou renomear grupo)
 export async function PUT(request: NextRequest) {
-  const { id, name, group_name } = await request.json();
+  const body = await request.json();
+
+  // 1. Alterar grupo em massa por array de IDs
+  if (body.ids && Array.isArray(body.ids)) {
+    const { ids, group_name } = body;
+    if (!group_name || typeof group_name !== 'string') {
+      return NextResponse.json({ error: 'group_name é obrigatório.' }, { status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from('contacts')
+      .update({
+        group_name: group_name.trim(),
+        updated_at: new Date().toISOString(),
+      })
+      .in('id', ids)
+      .select();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, updated: data?.length || 0 });
+  }
+
+  // 2. Renomear um grupo inteiro (old_group -> new_group)
+  if (body.old_group && body.new_group) {
+    const { old_group, new_group } = body;
+    const { data, error } = await supabase
+      .from('contacts')
+      .update({
+        group_name: new_group.trim(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('group_name', old_group)
+      .select();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, updated: data?.length || 0 });
+  }
+
+  // 3. Atualização individual
+  const { id, name, group_name } = body;
 
   if (!id) {
     return NextResponse.json({ error: 'ID do contato é obrigatório.' }, { status: 400 });
@@ -132,9 +177,17 @@ export async function PUT(request: NextRequest) {
   return NextResponse.json(data?.[0]);
 }
 
-// DELETE /api/contacts — Remove contato por ID
+// DELETE /api/contacts — Remove contato por ID ou múltiplos por IDs
 export async function DELETE(request: NextRequest) {
-  const { id } = await request.json();
+  const { id, ids } = await request.json();
+
+  if (ids && Array.isArray(ids)) {
+    const { error } = await supabase.from('contacts').delete().in('id', ids);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, deleted: ids.length });
+  }
 
   const { error } = await supabase.from('contacts').delete().eq('id', id);
 

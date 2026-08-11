@@ -107,12 +107,17 @@ function ContactsTab() {
   const [importResult, setImportResult] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Estado para Edição Inline de Contato
+  // Estado para Edição Inline e Seleção em Massa de Contatos
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editGroup, setEditGroup] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
   const [directSendTarget, setDirectSendTarget] = useState<{ show: boolean; contact?: Contact | null }>({ show: false });
+
+  // Seleção e Operações em Massa
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkGroupName, setBulkGroupName] = useState('');
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
@@ -144,6 +149,66 @@ function ContactsTab() {
     fetchContacts();
     fetchGroups();
   }, [fetchContacts, fetchGroups]);
+
+  const handleToggleSelectAll = () => {
+    if (selectedIds.length === contacts.length && contacts.length > 0) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(contacts.map((c) => c.id));
+    }
+  };
+
+  const handleToggleSelectOne = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkUpdateGroup = async () => {
+    if (selectedIds.length === 0 || !bulkGroupName.trim()) return;
+    setBulkActionLoading(true);
+
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedIds, group_name: bulkGroupName.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSelectedIds([]);
+        setBulkGroupName('');
+        fetchContacts();
+        fetchGroups();
+      }
+    } catch {
+      /* ignore */
+    }
+    setBulkActionLoading(false);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Tem certeza que deseja excluir ${selectedIds.length} contato(s) selecionado(s)?`)) return;
+    setBulkActionLoading(true);
+
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedIds }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSelectedIds([]);
+        fetchContacts();
+        fetchGroups();
+      }
+    } catch {
+      /* ignore */
+    }
+    setBulkActionLoading(false);
+  };
 
   const handleImport = async () => {
     if (!importText.trim()) return;
@@ -338,6 +403,60 @@ function ContactsTab() {
         </div>
       )}
 
+      {/* Barra de Ações em Massa */}
+      {selectedIds.length > 0 && (
+        <div className="glass-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 border border-accent/30 bg-accent/5 animate-fade-in">
+          <div className="flex items-center gap-2 text-sm font-semibold text-accent">
+            <CheckCircle className="w-4 h-4" />
+            <span>{selectedIds.length} contato(s) selecionado(s)</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 flex-1 max-w-xl justify-end">
+            <input
+              type="text"
+              list="groups-list"
+              placeholder="Digite ou escolha o novo grupo..."
+              value={bulkGroupName}
+              onChange={(e) => setBulkGroupName(e.target.value)}
+              className="text-sm py-1.5 px-3 min-w-[180px] flex-1"
+            />
+            <datalist id="groups-list">
+              {groups.map((g) => (
+                <option key={g} value={g} />
+              ))}
+            </datalist>
+
+            <button
+              onClick={handleBulkUpdateGroup}
+              disabled={bulkActionLoading || !bulkGroupName.trim()}
+              className="btn btn-primary btn-sm"
+              title="Mover todos os selecionados para este grupo"
+            >
+              {bulkActionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Edit2 className="w-3.5 h-3.5" />}
+              Mover para Grupo
+            </button>
+
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkActionLoading}
+              className="btn btn-secondary btn-sm text-danger hover:bg-danger/20"
+              title="Excluir todos os selecionados"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Excluir ({selectedIds.length})
+            </button>
+
+            <button
+              onClick={() => setSelectedIds([])}
+              className="btn btn-secondary btn-sm"
+              title="Limpar seleção"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard icon={Users} label="Total" value={contacts.length} />
@@ -350,6 +469,15 @@ function ContactsTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-muted">
+                <th className="p-4 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    checked={contacts.length > 0 && selectedIds.length === contacts.length}
+                    onChange={handleToggleSelectAll}
+                    className="cursor-pointer accent-accent"
+                    title="Selecionar Todos"
+                  />
+                </th>
                 <th className="p-4 font-medium">Nome</th>
                 <th className="p-4 font-medium">Telefone</th>
                 <th className="p-4 font-medium">Grupo</th>
@@ -359,16 +487,30 @@ function ContactsTab() {
             <tbody>
               {contacts.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-8 text-center text-muted">
+                  <td colSpan={5} className="p-8 text-center text-muted">
                     {loading ? 'Carregando...' : 'Nenhum contato encontrado. Importe seus contatos acima.'}
                   </td>
                 </tr>
               ) : (
                 contacts.map((c) => {
                   const isEditing = editingId === c.id;
+                  const isSelected = selectedIds.includes(c.id);
 
                   return (
-                    <tr key={c.id} className="border-b border-border/50 hover:bg-card-hover transition-smooth">
+                    <tr
+                      key={c.id}
+                      className={`border-b border-border/50 transition-smooth ${
+                        isSelected ? 'bg-accent/10' : 'hover:bg-card-hover'
+                      }`}
+                    >
+                      <td className="p-4 w-10 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectOne(c.id)}
+                          className="cursor-pointer accent-accent"
+                        />
+                      </td>
                       <td className="p-4 font-medium">
                         {isEditing ? (
                           <input
