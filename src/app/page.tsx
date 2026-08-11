@@ -578,13 +578,13 @@ function DispatchTab() {
 
         <div className="relative">
           <textarea
-            placeholder={"Mensagem para enviar.\nUse {{nome}} para personalizar.\n\nEx: Olá {{nome}}, tudo bem?"}
+            placeholder={"Mensagem para enviar.\nUse {{primeiro_nome}} para usar apenas o primeiro nome.\n\nEx: Olá {{primeiro_nome}}, tudo bem?"}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             rows={4}
           />
           <div className="absolute bottom-2 right-2 text-xs text-muted">
-            Variáveis: {"{{nome}}"} {"{{grupo}}"} {"{{telefone}}"}
+            Variáveis: {"{{primeiro_nome}}"} {"{{nome}}"} {"{{grupo}}"} {"{{telefone}}"}
           </div>
         </div>
 

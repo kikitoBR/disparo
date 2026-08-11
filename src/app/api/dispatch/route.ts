@@ -44,8 +44,13 @@ export async function POST(request: NextRequest) {
 
   // Cria os logs pendentes
   const logs = contacts.map((contact) => {
+    const fullName = (contact.name || '').trim();
+    const firstName = fullName ? fullName.split(/\s+/)[0] : '';
+
     const variables: Record<string, string> = {
-      nome: contact.name || '',
+      nome: fullName,
+      primeiro_nome: firstName,
+      primeironome: firstName,
       telefone: contact.phone_e164,
       grupo: contact.group_name || '',
       ...(contact.custom_fields || {}),
