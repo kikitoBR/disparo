@@ -23,9 +23,11 @@ import {
   Check,
   X,
   LogOut,
+  Folder,
 } from 'lucide-react';
 import type { Contact, Campaign, CampaignLog } from '@/lib/types';
 import { DirectSendModal } from '@/components/DirectSendModal';
+import { ManageGroupsModal } from '@/components/ManageGroupsModal';
 
 type Tab = 'contacts' | 'dispatch' | 'responses';
 
@@ -118,6 +120,7 @@ function ContactsTab() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkGroupName, setBulkGroupName] = useState('');
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [showManageGroups, setShowManageGroups] = useState(false);
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
@@ -321,6 +324,14 @@ function ContactsTab() {
             </option>
           ))}
         </select>
+        <button
+          onClick={() => setShowManageGroups(true)}
+          className="btn btn-secondary flex items-center gap-1.5"
+          title="Gerenciar, renomear e excluir grupos de contatos"
+        >
+          <Folder className="w-4 h-4 text-accent" />
+          Gerenciar Grupos
+        </button>
         <button onClick={() => setDirectSendTarget({ show: true, contact: null })} className="btn btn-secondary flex items-center gap-1.5" title="Enviar mensagem rápida para qualquer número ou contato">
           <MessageCircle className="w-4 h-4 text-accent" />
           Envio Avulso
@@ -600,6 +611,17 @@ function ContactsTab() {
         <DirectSendModal
           contact={directSendTarget.contact}
           onClose={() => setDirectSendTarget({ show: false, contact: null })}
+        />
+      )}
+
+      {/* Modal de Gerenciamento de Grupos */}
+      {showManageGroups && (
+        <ManageGroupsModal
+          onClose={() => setShowManageGroups(false)}
+          onGroupsUpdated={() => {
+            fetchContacts();
+            fetchGroups();
+          }}
         />
       )}
     </div>
