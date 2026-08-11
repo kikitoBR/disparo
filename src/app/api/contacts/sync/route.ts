@@ -21,13 +21,25 @@ interface EvolutionContact {
   isSaved?: boolean;
 }
 
+function extractContactsList(data: any): EvolutionContact[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.contacts)) return data.contacts;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.records)) return data.records;
+  if (Array.isArray(data.response)) return data.response;
+  if (Array.isArray(data.result)) return data.result;
+  if (Array.isArray(data.items)) return data.items;
+  return [];
+}
+
 /**
  * Valida se o item é um contato pessoal legítimo (e não um grupo ou lista de transmissão)
  */
 function isIndividualContact(item: EvolutionContact): boolean {
   const jid = (item.id || item.remoteJid || item.jid || '').toLowerCase();
 
-  // Exclui explicitamente se for marcado como grupo ou se não for usuário
+  // Exclui explicitamente se for marcado como grupo
   if (item.isGroup === true || (item as any).isGroup === 'true') return false;
   if (item.isUser === false || (item as any).isUser === 'false') return false;
 
@@ -51,56 +63,85 @@ function isIndividualContact(item: EvolutionContact): boolean {
   return true;
 }
 
-// POST /api/contacts/sync — Sincroniza TODOS os contatos pessoais do WhatsApp via Evolution API
+/**
+ * Faz varredura paginada na Evolution API para puxar TODOS os contatos sem corte de limite
+ */
+async function fetchAllFromEndpoint(
+  baseUrl: string,
+  instance: string,
+  endpointPath: string,
+  isGet: boolean,
+  headers: any
+): Promise<EvolutionContact[]> {
+  const items: EvolutionContact[] = [];
+
+  // Varre até 20 páginas (até 10.000 contatos)
+  for (let page = 1; page <= 20; page++) {
+    try {
+      let data: any = null;
+
+      if (isGet) {
+        const url = `${baseUrl}${endpointPath}/${instance}?page=${page}&limit=500&take=500`;
+        const res = await fetch(url, { headers });
+        if (res.ok) data = await res.json();
+      } else {
+        const url = `${baseUrl}${endpointPath}/${instance}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ page, limit: 500, take: 500, offset: (page - 1) * 500 }),
+        });
+        if (res.ok) data = await res.json();
+      }
+
+      const list = extractContactsList(data);
+      if (list.length === 0) break;
+
+      items.push(...list);
+
+      // Se a página retornou menos que 50 itens, encerra a paginação
+      if (list.length < 50) break;
+    } catch {
+      break;
+    }
+  }
+
+  return items;
+}
+
+// POST /api/contacts/sync — Sincroniza TODOS os 400+ contatos pessoais da agenda do WhatsApp
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const groupName = body.group || 'WhatsApp';
-
-    const allRawItems: EvolutionContact[] = [];
 
     const headers = {
       'Content-Type': 'application/json',
       apikey: EVOLUTION_API_KEY,
     };
 
-    // Tenta obter contatos de múltiplos endpoints da Evolution API para garantir que pegamos a agenda inteira sem limite de 100
+    const allRawItems: EvolutionContact[] = [];
+
+    // Múltiplos caminhos da Evolution API (v1 e v2) com busca paginada
     const endpoints = [
-      { url: `${EVOLUTION_API_URL}/chat/findContacts/${EVOLUTION_INSTANCE}`, method: 'POST', body: { limit: 10000 } },
-      { url: `${EVOLUTION_API_URL}/contact/find/${EVOLUTION_INSTANCE}`, method: 'POST', body: { where: {}, limit: 10000 } },
-      { url: `${EVOLUTION_API_URL}/chat/fetchContacts/${EVOLUTION_INSTANCE}`, method: 'POST', body: {} },
-      { url: `${EVOLUTION_API_URL}/chat/findContacts/${EVOLUTION_INSTANCE}?limit=10000`, method: 'GET' },
-      { url: `${EVOLUTION_API_URL}/contact/find/${EVOLUTION_INSTANCE}?limit=10000`, method: 'GET' },
+      { path: '/chat/findContacts', get: false },
+      { path: '/contact/find', get: false },
+      { path: '/chat/findChats', get: false },
+      { path: '/chat/fetchContacts', get: false },
+      { path: '/chat/findContacts', get: true },
+      { path: '/contact/find', get: true },
     ];
 
     for (const ep of endpoints) {
-      try {
-        const options: RequestInit = {
-          method: ep.method,
-          headers,
-        };
-        if (ep.method === 'POST' && ep.body) {
-          options.body = JSON.stringify(ep.body);
-        }
-
-        const res = await fetch(ep.url, options);
-        if (res.ok) {
-          const data = await res.json();
-          let list: EvolutionContact[] = [];
-          if (Array.isArray(data)) {
-            list = data;
-          } else if (data && Array.isArray(data.contacts)) {
-            list = data.contacts;
-          } else if (data && Array.isArray(data.response)) {
-            list = data.response;
-          }
-
-          if (list.length > 0) {
-            allRawItems.push(...list);
-          }
-        }
-      } catch {
-        /* ignora falhas individuais de endpoint */
+      const list = await fetchAllFromEndpoint(
+        EVOLUTION_API_URL,
+        EVOLUTION_INSTANCE,
+        ep.path,
+        ep.get,
+        headers
+      );
+      if (list.length > 0) {
+        allRawItems.push(...list);
       }
     }
 
@@ -114,7 +155,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Processa e desduplica contatos pessoais
+    // Processa, limpa telefone e desduplica contatos pessoais
     const toInsert: { phone_e164: string; name: string; group_name: string }[] = [];
     const seen = new Set<string>();
 
@@ -185,7 +226,7 @@ export async function POST(request: NextRequest) {
       inserted,
       updated,
       errors,
-      message: `🎉 Sincronização concluída! ${toInsert.length} contatos pessoais importados do WhatsApp (${inserted} novos, ${updated} atualizados). Grupos foram totalmente ignorados.`,
+      message: `🎉 Sincronização concluída! ${toInsert.length} contatos pessoais importados com sucesso! Telefones corrigidos e grupos filtrados.`,
     });
   } catch (err) {
     return NextResponse.json(

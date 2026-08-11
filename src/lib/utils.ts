@@ -1,23 +1,35 @@
-/**
- * Normaliza um número de telefone brasileiro para formato E.164 (55 + DDD + número).
- * Remove caracteres não numéricos e adiciona DDI 55 se necessário.
- */
 export function normalizePhone(raw: string): string | null {
+  if (!raw) return null;
+
   // Remove tudo que não for dígito
   let num = raw.replace(/\D/g, '');
 
-  // Se for muito curto, descarta
-  if (num.length < 10) return null;
-
-  // Se tem 10 ou 11 dígitos (sem DDI), adiciona 55
-  if (num.length === 10 || num.length === 11) {
-    num = '55' + num;
+  // Se o número começa com 550 (ex: 55 + 021 + numero), remove o 0 extra após o 55
+  if (num.startsWith('550')) {
+    num = '55' + num.slice(3);
   }
 
-  // Validação final: deve ter 12 ou 13 dígitos (55 + DDD 2dig + 8 ou 9 dig)
-  if (num.length < 12 || num.length > 13) return null;
+  // Remove zeros à esquerda (ex: 02199998888 -> 21999998888, 0021... -> 21...)
+  num = num.replace(/^0+/, '');
 
-  return num;
+  if (num.length < 10) return null;
+
+  // Se já começa com 55 e tem 12 ou 13 dígitos
+  if (num.startsWith('55') && (num.length === 12 || num.length === 13)) {
+    return num;
+  }
+
+  // Se tem 10 ou 11 dígitos (DDD + número)
+  if (num.length === 10 || num.length === 11) {
+    return '55' + num;
+  }
+
+  // Se tem mais de 13 dígitos e começa com 55 (corta no limite E.164)
+  if (num.startsWith('55') && num.length > 13) {
+    return num.slice(0, 13);
+  }
+
+  return null;
 }
 
 export interface ParsedContactInput {
