@@ -1,69 +1,709 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Users,
+  Send,
+  MessageCircle,
+  Plus,
+  Trash2,
+  Rocket,
+  RefreshCw,
+  Upload,
+  Search,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  MessageSquare,
+  Zap,
+  Hash,
+  Edit2,
+  Check,
+  X,
+} from 'lucide-react';
+import type { Contact, Campaign, CampaignLog } from '@/lib/types';
+
+type Tab = 'contacts' | 'dispatch' | 'responses';
+
+export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState<Tab>('contacts');
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="min-h-screen flex flex-col">
+      {/* Header */}
+      <header className="glass-card mx-4 mt-4 mb-2 px-6 py-4 flex items-center justify-between rounded-2xl">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
+            <Zap className="w-5 h-5 text-accent" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold tracking-tight">Disparo WhatsApp</h1>
+            <p className="text-xs text-muted">Evolution API • Painel de Controle</p>
+          </div>
+        </div>
+      </header>
+
+      {/* Tab Navigation */}
+      <nav className="mx-4 mb-3 flex gap-1 glass-card rounded-xl p-1.5">
+        {[
+          { id: 'contacts' as Tab, label: 'Contatos', icon: Users },
+          { id: 'dispatch' as Tab, label: 'Disparar', icon: Send },
+          { id: 'responses' as Tab, label: 'Respostas', icon: MessageCircle },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-smooth cursor-pointer ${
+              activeTab === tab.id
+                ? 'bg-accent/15 text-accent'
+                : 'text-muted hover:text-foreground hover:bg-surface'
+            }`}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Content */}
+      <main className="flex-1 mx-4 mb-4">
+        {activeTab === 'contacts' && <ContactsTab />}
+        {activeTab === 'dispatch' && <DispatchTab />}
+        {activeTab === 'responses' && <ResponsesTab />}
+      </main>
+    </div>
+  );
+}
+
+/* ===================== CONTATOS ===================== */
+function ContactsTab() {
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [groups, setGroups] = useState<string[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState('Todos');
+  const [search, setSearch] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importGroup, setImportGroup] = useState('Geral');
+  const [importResult, setImportResult] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Estado para Edição Inline de Contato
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editGroup, setEditGroup] = useState('');
+
+  const fetchContacts = useCallback(async () => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (selectedGroup !== 'Todos') params.set('group', selectedGroup);
+    if (search) params.set('search', search);
+
+    try {
+      const res = await fetch(`/api/contacts?${params}`);
+      const data = await res.json();
+      if (Array.isArray(data)) setContacts(data);
+    } catch {
+      /* ignore */
+    }
+    setLoading(false);
+  }, [selectedGroup, search]);
+
+  const fetchGroups = useCallback(async () => {
+    try {
+      const res = await fetch('/api/groups');
+      const data = await res.json();
+      if (Array.isArray(data)) setGroups(data);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchContacts();
+    fetchGroups();
+  }, [fetchContacts, fetchGroups]);
+
+  const handleImport = async () => {
+    if (!importText.trim()) return;
+    setLoading(true);
+    setImportResult('');
+
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: importText, group: importGroup }),
+      });
+      const data = await res.json();
+      setImportResult(data.message || 'Importação concluída.');
+      setImportText('');
+      fetchContacts();
+      fetchGroups();
+    } catch {
+      setImportResult('Erro na importação.');
+    }
+    setLoading(false);
+  };
+
+  const handleStartEdit = (contact: Contact) => {
+    setEditingId(contact.id);
+    setEditName(contact.name || '');
+    setEditGroup(contact.group_name || 'Geral');
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    try {
+      await fetch('/api/contacts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name: editName, group_name: editGroup }),
+      });
+      setEditingId(null);
+      fetchContacts();
+      fetchGroups();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    await fetch('/api/contacts', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    fetchContacts();
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Actions Bar */}
+      <div className="glass-card rounded-2xl p-4 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
+          <input
+            placeholder="Buscar por nome ou número..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && fetchContacts()}
+            className="pl-10"
+          />
+        </div>
+        <select
+          value={selectedGroup}
+          onChange={(e) => setSelectedGroup(e.target.value)}
+          className="w-auto min-w-[140px]"
+        >
+          <option value="Todos">Todos os grupos</option>
+          {groups.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
+        <button onClick={() => setShowImport(!showImport)} className="btn btn-primary">
+          <Plus className="w-4 h-4" />
+          Importar
+        </button>
+      </div>
+
+      {/* Import Panel */}
+      {showImport && (
+        <div className="glass-card rounded-2xl p-5 space-y-4 glow-border">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Upload className="w-4 h-4 text-accent" />
+              Importar Contatos
+            </h3>
+            <span className="text-xs text-muted">
+              Suporta formato <strong>Nome, Telefone</strong> ou apenas <strong>Telefone</strong>
+            </span>
+          </div>
+
+          <textarea
+            placeholder={
+              "Cole a lista aqui (um por linha):\nJoão Silva, 21999998888\nMaria Santos, 21988887777\n22977776666"
+            }
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            rows={5}
+          />
+          <div className="flex gap-3">
+            <input
+              placeholder="Grupo padrão (ex: Leads, VIP, Clientes)"
+              value={importGroup}
+              onChange={(e) => setImportGroup(e.target.value)}
+              className="flex-1"
+            />
+            <button onClick={handleImport} disabled={loading} className="btn btn-primary">
+              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              Salvar Lista
+            </button>
+          </div>
+          {importResult && (
+            <div className="text-sm p-3 rounded-lg bg-accent/10 text-accent">{importResult}</div>
+          )}
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard icon={Users} label="Total" value={contacts.length} />
+        <StatCard icon={Hash} label="Grupos" value={groups.length} />
+      </div>
+
+      {/* Contact List */}
+      <div className="glass-card rounded-2xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-muted">
+                <th className="p-4 font-medium">Nome</th>
+                <th className="p-4 font-medium">Telefone</th>
+                <th className="p-4 font-medium">Grupo</th>
+                <th className="p-4 font-medium w-28 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {contacts.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-muted">
+                    {loading ? 'Carregando...' : 'Nenhum contato encontrado. Importe seus contatos acima.'}
+                  </td>
+                </tr>
+              ) : (
+                contacts.map((c) => {
+                  const isEditing = editingId === c.id;
+
+                  return (
+                    <tr key={c.id} className="border-b border-border/50 hover:bg-card-hover transition-smooth">
+                      <td className="p-4 font-medium">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            className="py-1 px-2 text-sm w-full max-w-[200px]"
+                            placeholder="Nome do contato"
+                            autoFocus
+                          />
+                        ) : (
+                          c.name || <span className="text-muted italic">Sem nome</span>
+                        )}
+                      </td>
+
+                      <td className="p-4 font-mono text-sm text-muted">{c.phone_e164}</td>
+
+                      <td className="p-4">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editGroup}
+                            onChange={(e) => setEditGroup(e.target.value)}
+                            className="py-1 px-2 text-sm w-full max-w-[120px]"
+                            placeholder="Grupo"
+                          />
+                        ) : (
+                          <span className="badge badge-sent">{c.group_name}</span>
+                        )}
+                      </td>
+
+                      <td className="p-4 text-right">
+                        {isEditing ? (
+                          <div className="flex justify-end gap-1">
+                            <button
+                              onClick={() => handleSaveEdit(c.id)}
+                              title="Salvar"
+                              className="p-1.5 rounded-lg bg-accent/15 text-accent hover:bg-accent/25 transition-smooth cursor-pointer"
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setEditingId(null)}
+                              title="Cancelar"
+                              className="p-1.5 rounded-lg bg-muted/15 text-muted hover:bg-muted/25 transition-smooth cursor-pointer"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex justify-end gap-1">
+                            <button
+                              onClick={() => handleStartEdit(c)}
+                              title="Editar Nome/Grupo"
+                              className="p-1.5 rounded-lg hover:bg-accent/15 text-muted hover:text-accent transition-smooth cursor-pointer"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(c.id)}
+                              title="Excluir"
+                              className="p-1.5 rounded-lg hover:bg-danger/15 text-muted hover:text-danger transition-smooth cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== DISPARO ===================== */
+function DispatchTab() {
+  const [groups, setGroups] = useState<string[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [title, setTitle] = useState('');
+  const [message, setMessage] = useState('');
+  const [groupFilter, setGroupFilter] = useState('Todos');
+  const [delayMin, setDelayMin] = useState(15);
+  const [delayMax, setDelayMax] = useState(40);
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchResult, setDispatchResult] = useState('');
+
+  useEffect(() => {
+    fetch('/api/groups')
+      .then((r) => r.json())
+      .then((d) => Array.isArray(d) && setGroups(d))
+      .catch(() => {});
+    fetchCampaigns();
+  }, []);
+
+  const fetchCampaigns = async () => {
+    try {
+      const res = await fetch('/api/campaigns');
+      const data = await res.json();
+      if (Array.isArray(data)) setCampaigns(data);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleCreateAndDispatch = async () => {
+    if (!title.trim() || !message.trim()) return;
+    setDispatching(true);
+    setDispatchResult('');
+
+    try {
+      // 1. Cria a campanha
+      const campRes = await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          message_template: message,
+          group_filter: groupFilter,
+          delay_min: delayMin,
+          delay_max: delayMax,
+        }),
+      });
+      const campaign = await campRes.json();
+
+      if (!campaign.id) {
+        setDispatchResult('Erro ao criar campanha: ' + (campaign.error || ''));
+        setDispatching(false);
+        return;
+      }
+
+      setDispatchResult(`Campanha criada! Disparando para ${campaign.total_targets} contatos...`);
+
+      // 2. Inicia o disparo (async — pode demorar)
+      const dispatchRes = await fetch('/api/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: campaign.id }),
+      });
+      const result = await dispatchRes.json();
+
+      if (result.success) {
+        setDispatchResult(
+          `✅ Disparo finalizado! ${result.sent} enviados, ${result.failed} erros de ${result.total} contatos.`
+        );
+      } else {
+        setDispatchResult('❌ Erro no disparo: ' + (result.error || ''));
+      }
+
+      setTitle('');
+      setMessage('');
+      fetchCampaigns();
+    } catch (err) {
+      setDispatchResult('Erro: ' + (err instanceof Error ? err.message : 'Desconhecido'));
+    }
+    setDispatching(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Create Campaign */}
+      <div className="glass-card rounded-2xl p-5 space-y-4">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Rocket className="w-4 h-4 text-accent" />
+          Novo Disparo
+        </h3>
+
+        <input
+          placeholder="Título da campanha (ex: Promoção Agosto)"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+
+        <div className="relative">
+          <textarea
+            placeholder={"Mensagem para enviar.\nUse {{nome}} para personalizar.\n\nEx: Olá {{nome}}, tudo bem?"}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={4}
+          />
+          <div className="absolute bottom-2 right-2 text-xs text-muted">
+            Variáveis: {"{{nome}}"} {"{{grupo}}"} {"{{telefone}}"}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+            <option value="Todos">Todos os contatos</option>
+            {groups.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-muted shrink-0" />
+            <input
+              type="number"
+              value={delayMin}
+              onChange={(e) => setDelayMin(Number(e.target.value))}
+              min={5}
+              placeholder="Min (s)"
+            />
+            <span className="text-muted text-sm">a</span>
+            <input
+              type="number"
+              value={delayMax}
+              onChange={(e) => setDelayMax(Number(e.target.value))}
+              min={10}
+              placeholder="Max (s)"
+            />
+            <span className="text-muted text-xs shrink-0">seg</span>
+          </div>
+        </div>
+
+        <button
+          onClick={handleCreateAndDispatch}
+          disabled={dispatching || !title.trim() || !message.trim()}
+          className="btn btn-primary w-full"
+        >
+          {dispatching ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Disparando...
+            </>
+          ) : (
+            <>
+              <Send className="w-4 h-4" />
+              Criar e Disparar
+            </>
+          )}
+        </button>
+
+        {dispatchResult && (
+          <div
+            className={`text-sm p-3 rounded-lg ${
+              dispatchResult.includes('✅')
+                ? 'bg-accent/10 text-accent'
+                : dispatchResult.includes('❌')
+                ? 'bg-danger/10 text-danger'
+                : 'bg-info/10 text-info'
+            }`}
+          >
+            {dispatchResult}
+          </div>
+        )}
+      </div>
+
+      {/* Campaign History */}
+      <div className="glass-card rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-accent" />
+            Campanhas Anteriores
+          </h3>
+          <button onClick={fetchCampaigns} className="btn btn-secondary btn-sm">
+            <RefreshCw className="w-3 h-3" />
+          </button>
+        </div>
+
+        {campaigns.length === 0 ? (
+          <p className="text-muted text-sm text-center py-6">Nenhuma campanha criada ainda.</p>
+        ) : (
+          <div className="space-y-3">
+            {campaigns.map((c) => (
+              <div
+                key={c.id}
+                className={`p-4 rounded-xl border border-border/50 bg-surface/50 hover:bg-card-hover transition-smooth ${
+                  c.status === 'running' ? 'pulse-active' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-sm">{c.title}</span>
+                  <span className={`badge badge-${c.status}`}>{c.status}</span>
+                </div>
+                <div className="flex gap-4 text-xs text-muted">
+                  <span className="flex items-center gap-1">
+                    <Users className="w-3 h-3" />
+                    {c.total_targets} alvos
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3 text-accent" />
+                    {c.sent_count} enviados
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <XCircle className="w-3 h-3 text-danger" />
+                    {c.failed_count} erros
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <MessageCircle className="w-3 h-3 text-info" />
+                    {c.responded_count} respostas
+                  </span>
+                </div>
+                {/* Progress bar */}
+                {c.total_targets > 0 && (
+                  <div className="mt-3 h-1.5 rounded-full bg-border overflow-hidden">
+                    <div
+                      className="h-full bg-accent rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.round(((c.sent_count + c.failed_count) / c.total_targets) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ===================== RESPOSTAS ===================== */
+function ResponsesTab() {
+  const [logs, setLogs] = useState<CampaignLog[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchResponses = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/logs');
+      const data = await res.json();
+      if (Array.isArray(data)) setLogs(data);
+    } catch {
+      /* ignore */
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchResponses();
+    // Auto-refresh every 15s
+    const interval = setInterval(fetchResponses, 15000);
+    return () => clearInterval(interval);
+  }, [fetchResponses]);
+
+  return (
+    <div className="space-y-4">
+      <div className="glass-card rounded-2xl p-4 flex items-center justify-between">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <MessageCircle className="w-4 h-4 text-accent" />
+          Respostas dos Clientes
+          <span className="text-xs text-muted">(atualiza automaticamente)</span>
+        </h3>
+        <button onClick={fetchResponses} className="btn btn-secondary btn-sm">
+          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
+      {logs.length === 0 ? (
+        <div className="glass-card rounded-2xl p-12 text-center">
+          <AlertCircle className="w-10 h-10 mx-auto mb-3 text-muted" />
+          <p className="text-muted text-sm">
+            Nenhuma resposta recebida ainda.
+            <br />
+            <span className="text-xs">
+              Configure o webhook da Evolution API apontando para{' '}
+              <code className="text-accent text-xs">https://seu-dominio.vercel.app/api/webhook</code>
+            </span>
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      ) : (
+        <div className="space-y-3">
+          {logs.map((log) => (
+            <div key={log.id} className="glass-card rounded-2xl p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-info/15 flex items-center justify-center">
+                    <MessageCircle className="w-4 h-4 text-info" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium font-mono">{log.phone_e164}</span>
+                    <span className={`badge badge-${log.status} ml-2`}>{log.status}</span>
+                  </div>
+                </div>
+                <span className="text-xs text-muted">
+                  {log.response_at ? new Date(log.response_at).toLocaleString('pt-BR') : '—'}
+                </span>
+              </div>
+
+              {/* Mensagem enviada */}
+              <div className="p-3 rounded-lg bg-accent/5 border border-accent/10 text-sm">
+                <span className="text-xs text-muted block mb-1">📤 Enviada:</span>
+                {log.rendered_message}
+              </div>
+
+              {/* Resposta do cliente */}
+              {log.response_text && (
+                <div className="p-3 rounded-lg bg-info/5 border border-info/10 text-sm">
+                  <span className="text-xs text-muted block mb-1">📥 Resposta:</span>
+                  {log.response_text}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
-      </main>
+      )}
+    </div>
+  );
+}
+
+/* ===================== STAT CARD ===================== */
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: number | string;
+}) {
+  return (
+    <div className="glass-card rounded-xl p-4 flex items-center gap-3">
+      <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center">
+        <Icon className="w-4 h-4 text-accent" />
+      </div>
+      <div>
+        <p className="text-lg font-bold">{value}</p>
+        <p className="text-xs text-muted">{label}</p>
+      </div>
     </div>
   );
 }
