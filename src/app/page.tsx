@@ -112,6 +112,7 @@ function ContactsTab() {
   const [editGroup, setEditGroup] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState('');
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
@@ -185,6 +186,39 @@ function ContactsTab() {
     setLoading(false);
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingFile(true);
+    setImportResult('');
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('group', importGroup || 'Importado');
+
+    try {
+      const res = await fetch('/api/contacts/import-file', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setImportResult(data.message);
+        fetchContacts();
+        fetchGroups();
+      } else {
+        setImportResult(`❌ ${data.error || 'Erro ao importar arquivo.'}`);
+      }
+    } catch {
+      setImportResult('❌ Erro ao enviar arquivo para o servidor.');
+    }
+    setUploadingFile(false);
+    // Limpar o input de arquivo
+    e.target.value = '';
+  };
+
   const handleStartEdit = (contact: Contact) => {
     setEditingId(contact.id);
     setEditName(contact.name || '');
@@ -241,20 +275,20 @@ function ContactsTab() {
             </option>
           ))}
         </select>
-        <button onClick={handleSyncWhatsApp} disabled={syncing} className="btn btn-secondary">
+        <button onClick={handleSyncWhatsApp} disabled={syncing} className="btn btn-secondary" title="Importa contatos diretamente do seu WhatsApp via Evolution API">
           <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
           {syncing ? 'Sincronizando...' : 'Sincronizar WhatsApp'}
         </button>
         <button onClick={() => setShowImport(!showImport)} className="btn btn-primary">
           <Plus className="w-4 h-4" />
-          Importar
+          Importar CSV / Texto
         </button>
       </div>
 
       {syncResult && (
         <div
           className={`text-sm p-3 rounded-xl ${
-            syncResult.includes('🎉') ? 'bg-accent/10 text-accent' : 'bg-danger/10 text-danger'
+            syncResult.includes('✅') ? 'bg-accent/10 text-accent' : 'bg-danger/10 text-danger'
           }`}
         >
           {syncResult}
@@ -267,33 +301,66 @@ function ContactsTab() {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold flex items-center gap-2">
               <Upload className="w-4 h-4 text-accent" />
-              Importar Contatos
+              Importar Contatos (CSV, vCard ou Texto)
             </h3>
             <span className="text-xs text-muted">
-              Suporta formato <strong>Nome, Telefone</strong> ou apenas <strong>Telefone</strong>
+              Aceita <strong>CSV (Google Contacts)</strong>, <strong>.vcf (vCard)</strong> ou <strong>Texto</strong>
             </span>
           </div>
 
-          <textarea
-            placeholder={
-              "Cole a lista aqui (um por linha):\nJoão Silva, 21999998888\nMaria Santos, 21988887777\n22977776666"
-            }
-            value={importText}
-            onChange={(e) => setImportText(e.target.value)}
-            rows={5}
-          />
-          <div className="flex gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Opção 1: Upload de Arquivo */}
+            <div className="p-4 rounded-xl border border-border/80 bg-surface/50 space-y-3">
+              <div className="text-xs font-semibold text-foreground flex items-center gap-2">
+                <Upload className="w-3.5 h-3.5 text-accent" />
+                Opção 1: Subir Arquivo (Google Contacts CSV ou vCard .vcf)
+              </div>
+              <p className="text-xs text-muted">
+                Exporte do <a href="https://contacts.google.com" target="_blank" rel="noreferrer" className="text-accent underline">Google Contatos</a> como CSV ou do seu telefone como .vcf.
+              </p>
+              <input
+                type="file"
+                accept=".csv,.vcf,.vcard,.txt"
+                onChange={handleFileUpload}
+                disabled={uploadingFile}
+                className="text-xs file:btn file:btn-secondary file:btn-sm file:mr-3 cursor-pointer"
+              />
+              {uploadingFile && (
+                <div className="text-xs text-accent flex items-center gap-1.5">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> Processando arquivo...
+                </div>
+              )}
+            </div>
+
+            {/* Opção 2: Colar Lista Manual */}
+            <div className="p-4 rounded-xl border border-border/80 bg-surface/50 space-y-3">
+              <div className="text-xs font-semibold text-foreground">
+                Opção 2: Colar Lista de Texto
+              </div>
+              <textarea
+                placeholder={
+                  "Cole a lista aqui (um por linha):\nJoão Silva, 21999998888\nMaria Santos, 21988887777\n22977776666"
+                }
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                rows={3}
+              />
+              <button onClick={handleImport} disabled={loading} className="btn btn-primary btn-sm w-full">
+                {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                Importar Texto
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
             <input
-              placeholder="Grupo padrão (ex: Leads, VIP, Clientes)"
+              placeholder="Grupo padrão para estes contatos (ex: Google, VIP, Clientes)"
               value={importGroup}
               onChange={(e) => setImportGroup(e.target.value)}
-              className="flex-1"
+              className="flex-1 text-sm"
             />
-            <button onClick={handleImport} disabled={loading} className="btn btn-primary">
-              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              Salvar Lista
-            </button>
           </div>
+
           {importResult && (
             <div className="text-sm p-3 rounded-lg bg-accent/10 text-accent">{importResult}</div>
           )}

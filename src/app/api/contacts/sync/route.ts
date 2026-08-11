@@ -7,203 +7,222 @@ const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || 'teste';
 
 interface EvolutionContact {
-  id?: string;
-  remoteJid?: string;
-  jid?: string;
-  name?: string;
+  id: string;
   pushName?: string;
-  verifiedName?: string;
-  shortName?: string;
   number?: string;
-  isGroup?: boolean;
-  isUser?: boolean;
-  isMyContact?: boolean;
-  isSaved?: boolean;
-}
-
-function extractContactsList(data: any): EvolutionContact[] {
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data.contacts)) return data.contacts;
-  if (Array.isArray(data.data)) return data.data;
-  if (Array.isArray(data.records)) return data.records;
-  if (Array.isArray(data.response)) return data.response;
-  if (Array.isArray(data.result)) return data.result;
-  if (Array.isArray(data.items)) return data.items;
-  return [];
+  profilePictureUrl?: string | null;
 }
 
 /**
- * Valida se o item é um contato pessoal legítimo (e não um grupo ou lista de transmissão)
+ * Extrai o número de telefone limpo do JID do WhatsApp.
+ * O formato do JID é: "5511999999999@s.whatsapp.net"
+ * Retorna apenas a parte numérica antes do @
  */
-function isIndividualContact(item: EvolutionContact): boolean {
-  const jid = (item.id || item.remoteJid || item.jid || '').toLowerCase();
+function extractPhoneFromJid(jid: string): string {
+  if (!jid) return '';
+  // Remove tudo após o @ (inclusive o @)
+  const numberPart = jid.split('@')[0];
+  // Remove qualquer caractere não-numérico
+  return numberPart.replace(/\D/g, '');
+}
 
-  // Exclui explicitamente se for marcado como grupo
-  if (item.isGroup === true || (item as any).isGroup === 'true') return false;
-  if (item.isUser === false || (item as any).isUser === 'false') return false;
+/**
+ * Verifica se o JID é de um contato individual (não grupo, broadcast, etc.)
+ */
+function isPersonalContact(jid: string): boolean {
+  if (!jid) return false;
+  const lower = jid.toLowerCase();
 
-  // Exclui JIDs de grupo (@g.us), transmissão (@broadcast) e status
+  // Apenas aceitar JIDs que terminam com @s.whatsapp.net (contatos pessoais)
+  if (!lower.endsWith('@s.whatsapp.net')) return false;
+
+  // Excluir JIDs especiais
   if (
-    jid.includes('@g.us') ||
-    jid.includes('@broadcast') ||
-    jid.includes('status@') ||
-    jid.includes('0@s.whatsapp.net') ||
-    jid.includes('newsletter')
+    lower.includes('status@') ||
+    lower.startsWith('0@') ||
+    lower.includes('newsletter') ||
+    lower.includes('broadcast')
   ) {
     return false;
   }
 
-  // Grupos antigos do WhatsApp usavam formato numero-timestamp@g.us
-  if (jid.includes('-')) return false;
+  // Extrair a parte numérica e validar
+  const numberPart = lower.split('@')[0];
 
-  // Se tiver um domínio @ que não seja @s.whatsapp.net, ignora
-  if (jid.includes('@') && !jid.endsWith('@s.whatsapp.net')) return false;
+  // Se contém hífen, é formato de grupo antigo
+  if (numberPart.includes('-')) return false;
+
+  // O número deve ter pelo menos 8 dígitos
+  const digits = numberPart.replace(/\D/g, '');
+  if (digits.length < 8) return false;
 
   return true;
 }
 
 /**
- * Faz varredura paginada na Evolution API para puxar TODOS os contatos sem corte de limite
+ * Busca contatos via POST /chat/findContacts/{instanceName}
+ * Usa paginação com take/skip conforme a documentação oficial
  */
-async function fetchAllFromEndpoint(
+async function fetchContactsFromEvolution(
   baseUrl: string,
   instance: string,
-  endpointPath: string,
-  isGet: boolean,
-  headers: any
+  apiKey: string
 ): Promise<EvolutionContact[]> {
-  const items: EvolutionContact[] = [];
+  const allContacts: EvolutionContact[] = [];
+  const PAGE_SIZE = 500;
+  let skip = 0;
+  let hasMore = true;
 
-  // Varre até 20 páginas (até 10.000 contatos)
-  for (let page = 1; page <= 20; page++) {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    apikey: apiKey,
+  };
+
+  while (hasMore) {
     try {
-      let data: any = null;
+      // Documentação oficial: POST /chat/findContacts/{instanceName}
+      // Body: { where: {}, take: number, skip: number }
+      const url = `${baseUrl}/chat/findContacts/${instance}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          where: {},
+          take: PAGE_SIZE,
+          skip: skip,
+        }),
+      });
 
-      if (isGet) {
-        const url = `${baseUrl}${endpointPath}/${instance}?page=${page}&limit=500&take=500`;
-        const res = await fetch(url, { headers });
-        if (res.ok) data = await res.json();
-      } else {
-        const url = `${baseUrl}${endpointPath}/${instance}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ page, limit: 500, take: 500, offset: (page - 1) * 500 }),
-        });
-        if (res.ok) data = await res.json();
+      if (!res.ok) {
+        console.error(`Evolution API responded with ${res.status}: ${res.statusText}`);
+        break;
       }
 
-      const list = extractContactsList(data);
-      if (list.length === 0) break;
+      const data = await res.json();
 
-      items.push(...list);
+      // A resposta é um array de contatos
+      const contacts: EvolutionContact[] = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.contacts)
+          ? data.contacts
+          : Array.isArray(data?.data)
+            ? data.data
+            : [];
 
-      // Se a página retornou menos que 50 itens, encerra a paginação
-      if (list.length < 50) break;
-    } catch {
+      if (contacts.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      allContacts.push(...contacts);
+      skip += contacts.length;
+
+      // Se retornou menos que o PAGE_SIZE, não tem mais páginas
+      if (contacts.length < PAGE_SIZE) {
+        hasMore = false;
+      }
+
+      // Segurança: máximo de 5000 contatos
+      if (allContacts.length >= 5000) {
+        hasMore = false;
+      }
+    } catch (err) {
+      console.error('Erro ao buscar contatos da Evolution API:', err);
       break;
     }
   }
 
-  return items;
+  return allContacts;
 }
 
-// POST /api/contacts/sync — Sincroniza TODOS os 400+ contatos pessoais da agenda do WhatsApp
+// POST /api/contacts/sync — Sincroniza contatos do WhatsApp via Evolution API
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const groupName = body.group || 'WhatsApp';
 
-    const headers = {
-      'Content-Type': 'application/json',
-      apikey: EVOLUTION_API_KEY,
-    };
+    // 1. Buscar todos os contatos da Evolution API
+    const rawContacts = await fetchContactsFromEvolution(
+      EVOLUTION_API_URL,
+      EVOLUTION_INSTANCE,
+      EVOLUTION_API_KEY
+    );
 
-    const allRawItems: EvolutionContact[] = [];
-
-    // Múltiplos caminhos da Evolution API (v1 e v2) com busca paginada
-    const endpoints = [
-      { path: '/chat/findContacts', get: false },
-      { path: '/contact/find', get: false },
-      { path: '/chat/findChats', get: false },
-      { path: '/chat/fetchContacts', get: false },
-      { path: '/chat/findContacts', get: true },
-      { path: '/contact/find', get: true },
-    ];
-
-    for (const ep of endpoints) {
-      const list = await fetchAllFromEndpoint(
-        EVOLUTION_API_URL,
-        EVOLUTION_INSTANCE,
-        ep.path,
-        ep.get,
-        headers
-      );
-      if (list.length > 0) {
-        allRawItems.push(...list);
-      }
-    }
-
-    if (allRawItems.length === 0) {
+    if (rawContacts.length === 0) {
       return NextResponse.json(
         {
           error:
-            'Não foi possível obter os contatos da Evolution API. Verifique se a instância do WhatsApp está conectada.',
+            'Não foi possível obter contatos da Evolution API. Verifique se a instância está conectada e se a API Key está correta.',
+          details: `URL: ${EVOLUTION_API_URL}, Instance: ${EVOLUTION_INSTANCE}`,
         },
         { status: 400 }
       );
     }
 
-    // Processa, limpa telefone e desduplica contatos pessoais
+    // 2. Filtrar apenas contatos pessoais (não grupos) e processar telefones
     const toInsert: { phone_e164: string; name: string; group_name: string }[] = [];
     const seen = new Set<string>();
+    let groupsFiltered = 0;
+    let invalidPhones = 0;
 
-    for (const item of allRawItems) {
-      if (!isIndividualContact(item)) continue;
+    for (const contact of rawContacts) {
+      const jid = contact.id || '';
 
-      const jid = item.id || item.remoteJid || item.jid || '';
-      const rawNumber = item.number || jid.split('@')[0] || '';
+      // Filtrar: apenas contatos pessoais
+      if (!isPersonalContact(jid)) {
+        groupsFiltered++;
+        continue;
+      }
+
+      // Extrair número corretamente do JID
+      const rawNumber = extractPhoneFromJid(jid);
       const phone = normalizePhone(rawNumber);
 
-      if (phone && !seen.has(phone)) {
-        seen.add(phone);
-        const name =
-          item.name ||
-          item.pushName ||
-          item.verifiedName ||
-          item.shortName ||
-          '';
-
-        toInsert.push({
-          phone_e164: phone,
-          name: name.trim(),
-          group_name: groupName,
-        });
+      if (!phone) {
+        invalidPhones++;
+        continue;
       }
+
+      if (seen.has(phone)) continue;
+      seen.add(phone);
+
+      // O pushName é o nome do perfil WhatsApp do contato (definido por ele mesmo)
+      const name = (contact.pushName || '').trim();
+
+      toInsert.push({
+        phone_e164: phone,
+        name,
+        group_name: groupName,
+      });
     }
 
     if (toInsert.length === 0) {
-      return NextResponse.json({ message: 'Nenhum contato pessoal válido encontrado na agenda.' });
+      return NextResponse.json({
+        message: `Nenhum contato pessoal válido encontrado. Total da API: ${rawContacts.length}, Grupos filtrados: ${groupsFiltered}, Telefones inválidos: ${invalidPhones}`,
+      });
     }
 
-    // Insere/Atualiza no Supabase
+    // 3. Inserir/Atualizar no Supabase (upsert por phone_e164)
     let inserted = 0;
     let updated = 0;
     let errors = 0;
 
     for (const contact of toInsert) {
+      // Só atualizar o nome se vier preenchido da API (não sobrescrever um nome manual com vazio)
+      const upsertData: Record<string, string> = {
+        phone_e164: contact.phone_e164,
+        group_name: contact.group_name,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Se tem nome vindo da API, inclui no upsert
+      if (contact.name) {
+        upsertData.name = contact.name;
+      }
+
       const { data, error } = await supabase
         .from('contacts')
-        .upsert(
-          {
-            phone_e164: contact.phone_e164,
-            name: contact.name,
-            group_name: contact.group_name,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'phone_e164' }
-        )
+        .upsert(upsertData, { onConflict: 'phone_e164' })
         .select();
 
       if (error) {
@@ -222,11 +241,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      totalFromApi: rawContacts.length,
+      groupsFiltered,
+      invalidPhones,
       totalSynced: toInsert.length,
       inserted,
       updated,
       errors,
-      message: `🎉 Sincronização concluída! ${toInsert.length} contatos pessoais importados com sucesso! Telefones corrigidos e grupos filtrados.`,
+      message: `✅ Sincronização concluída! ${toInsert.length} contatos pessoais importados (${inserted} novos, ${updated} atualizados). ${groupsFiltered} grupos filtrados. Nota: a Evolution API retorna apenas contatos com quem você já interagiu no WhatsApp. Para importar todos os seus 407 contatos, use "Importar CSV/vCard".`,
     });
   } catch (err) {
     return NextResponse.json(
