@@ -25,6 +25,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import type { Contact, Campaign, CampaignLog } from '@/lib/types';
+import { DirectSendModal } from '@/components/DirectSendModal';
 
 type Tab = 'contacts' | 'dispatch' | 'responses';
 
@@ -111,6 +112,7 @@ function ContactsTab() {
   const [editName, setEditName] = useState('');
   const [editGroup, setEditGroup] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [directSendTarget, setDirectSendTarget] = useState<{ show: boolean; contact?: Contact | null }>({ show: false });
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
@@ -254,6 +256,10 @@ function ContactsTab() {
             </option>
           ))}
         </select>
+        <button onClick={() => setDirectSendTarget({ show: true, contact: null })} className="btn btn-secondary flex items-center gap-1.5" title="Enviar mensagem rápida para qualquer número ou contato">
+          <MessageCircle className="w-4 h-4 text-accent" />
+          Envio Avulso
+        </button>
         <button onClick={() => setShowImport(!showImport)} className="btn btn-primary">
           <Plus className="w-4 h-4" />
           Importar Contatos
@@ -415,6 +421,13 @@ function ContactsTab() {
                         ) : (
                           <div className="flex justify-end gap-1">
                             <button
+                              onClick={() => setDirectSendTarget({ show: true, contact: c })}
+                              title="Enviar Mensagem Direta"
+                              className="p-1.5 rounded-lg hover:bg-accent/15 text-muted hover:text-accent transition-smooth cursor-pointer"
+                            >
+                              <MessageCircle className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => handleStartEdit(c)}
                               title="Editar Nome/Grupo"
                               className="p-1.5 rounded-lg hover:bg-accent/15 text-muted hover:text-accent transition-smooth cursor-pointer"
@@ -439,6 +452,14 @@ function ContactsTab() {
           </table>
         </div>
       </div>
+
+      {/* Modal de Envio Avulso */}
+      {directSendTarget.show && (
+        <DirectSendModal
+          contact={directSendTarget.contact}
+          onClose={() => setDirectSendTarget({ show: false, contact: null })}
+        />
+      )}
     </div>
   );
 }
