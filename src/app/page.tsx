@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Users,
   Send,
@@ -21,6 +22,7 @@ import {
   Edit2,
   Check,
   X,
+  LogOut,
 } from 'lucide-react';
 import type { Contact, Campaign, CampaignLog } from '@/lib/types';
 
@@ -28,6 +30,13 @@ type Tab = 'contacts' | 'dispatch' | 'responses';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('contacts');
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -42,6 +51,15 @@ export default function Dashboard() {
             <p className="text-xs text-muted">Evolution API • Painel de Controle</p>
           </div>
         </div>
+
+        <button
+          onClick={handleLogout}
+          title="Sair do painel"
+          className="btn btn-secondary btn-sm flex items-center gap-1.5"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          Sair
+        </button>
       </header>
 
       {/* Tab Navigation */}
