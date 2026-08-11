@@ -110,8 +110,6 @@ function ContactsTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editGroup, setEditGroup] = useState('');
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
 
   const fetchContacts = useCallback(async () => {
@@ -144,25 +142,6 @@ function ContactsTab() {
     fetchContacts();
     fetchGroups();
   }, [fetchContacts, fetchGroups]);
-
-  const handleSyncWhatsApp = async () => {
-    setSyncing(true);
-    setSyncResult('');
-    try {
-      const res = await fetch('/api/contacts/sync', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setSyncResult(data.message);
-        fetchContacts();
-        fetchGroups();
-      } else {
-        setSyncResult(`❌ ${data.error || 'Erro na sincronização.'}`);
-      }
-    } catch {
-      setSyncResult('❌ Erro de conexão com o servidor.');
-    }
-    setSyncing(false);
-  };
 
   const handleImport = async () => {
     if (!importText.trim()) return;
@@ -275,25 +254,11 @@ function ContactsTab() {
             </option>
           ))}
         </select>
-        <button onClick={handleSyncWhatsApp} disabled={syncing} className="btn btn-secondary" title="Importa contatos diretamente do seu WhatsApp via Evolution API">
-          <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-          {syncing ? 'Sincronizando...' : 'Sincronizar WhatsApp'}
-        </button>
         <button onClick={() => setShowImport(!showImport)} className="btn btn-primary">
           <Plus className="w-4 h-4" />
-          Importar CSV / Texto
+          Importar Contatos
         </button>
       </div>
-
-      {syncResult && (
-        <div
-          className={`text-sm p-3 rounded-xl ${
-            syncResult.includes('✅') ? 'bg-accent/10 text-accent' : 'bg-danger/10 text-danger'
-          }`}
-        >
-          {syncResult}
-        </div>
-      )}
 
       {/* Import Panel */}
       {showImport && (
