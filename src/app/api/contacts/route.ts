@@ -27,8 +27,48 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data);
+  // Busca logs de envio para agregar contagem e data do último disparo por contato
+  const { data: logs } = await supabase
+    .from('campaign_logs')
+    .select('contact_id, phone_e164, sent_at, status')
+    .in('status', ['sent', 'responded']);
+
+  const statsMap: Record<string, { count: number; lastSent: string | null }> = {};
+  if (logs) {
+    for (const log of logs) {
+      const keyById = log.contact_id;
+      const keyByPhone = log.phone_e164;
+
+      if (keyById) {
+        if (!statsMap[keyById]) statsMap[keyById] = { count: 0, lastSent: null };
+        statsMap[keyById].count += 1;
+        if (log.sent_at && (!statsMap[keyById].lastSent || new Date(log.sent_at) > new Date(statsMap[keyById].lastSent!))) {
+          statsMap[keyById].lastSent = log.sent_at;
+        }
+      }
+
+      if (keyByPhone) {
+        if (!statsMap[keyByPhone]) statsMap[keyByPhone] = { count: 0, lastSent: null };
+        statsMap[keyByPhone].count += 1;
+        if (log.sent_at && (!statsMap[keyByPhone].lastSent || new Date(log.sent_at) > new Date(statsMap[keyByPhone].lastSent!))) {
+          statsMap[keyByPhone].lastSent = log.sent_at;
+        }
+      }
+    }
+  }
+
+  const enrichedContacts = (data || []).map((c) => {
+    const stat = statsMap[c.id] || statsMap[c.phone_e164] || { count: 0, lastSent: null };
+    return {
+      ...c,
+      sent_count: stat.count,
+      last_sent_at: stat.lastSent,
+    };
+  });
+
+  return NextResponse.json(enrichedContacts);
 }
+
 
 // POST /api/contacts — Importa contatos (com desduplicação)
 // Body: { contacts: [{ phone, name?, group? }] } OU { text: "lista de contatos (Nome, Telefone ou Telefone)", group?: "Grupo" }

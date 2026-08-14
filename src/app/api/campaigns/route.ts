@@ -19,10 +19,10 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  const { title, message_template, group_filter, delay_min, delay_max } = body;
+  const { title, message_template, group_filter, delay_min, delay_max, media_url, media_type } = body;
 
-  if (!title || !message_template) {
-    return NextResponse.json({ error: 'Título e mensagem são obrigatórios.' }, { status: 400 });
+  if (!title || (!message_template && !media_url)) {
+    return NextResponse.json({ error: 'Título e mensagem ou foto são obrigatórios.' }, { status: 400 });
   }
 
   // Conta os contatos que serão alvo
@@ -32,18 +32,39 @@ export async function POST(request: NextRequest) {
   }
   const { count } = await query;
 
-  const { data, error } = await supabase
+  const campaignPayload: Record<string, unknown> = {
+    title,
+    message_template: message_template || '',
+    group_filter: group_filter || null,
+    delay_min: delay_min || 15,
+    delay_max: delay_max || 40,
+    total_targets: count || 0,
+  };
+
+  if (media_url) {
+    campaignPayload.media_url = media_url;
+    campaignPayload.media_type = media_type || 'image';
+  }
+
+  // Tentativa de inserção direta com media_url
+  let { data, error } = await supabase
     .from('campaigns')
-    .insert({
-      title,
-      message_template,
-      group_filter: group_filter || null,
-      delay_min: delay_min || 15,
-      delay_max: delay_max || 40,
-      total_targets: count || 0,
-    })
+    .insert(campaignPayload)
     .select()
     .single();
+
+  // Fallback caso as colunas media_url ainda não existam no Supabase
+  if (error && error.message?.includes('media_url')) {
+    delete campaignPayload.media_url;
+    delete campaignPayload.media_type;
+    const retry = await supabase
+      .from('campaigns')
+      .insert(campaignPayload)
+      .select()
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -51,3 +72,4 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json(data);
 }
+

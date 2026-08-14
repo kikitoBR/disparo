@@ -24,10 +24,17 @@ import {
   X,
   LogOut,
   Folder,
+  Image as ImageIcon,
+  History,
+  Play,
+  Pause,
 } from 'lucide-react';
 import type { Contact, Campaign, CampaignLog } from '@/lib/types';
 import { DirectSendModal } from '@/components/DirectSendModal';
 import { ManageGroupsModal } from '@/components/ManageGroupsModal';
+import { ContactHistoryModal } from '@/components/ContactHistoryModal';
+import { ActiveDispatchModal } from '@/components/ActiveDispatchModal';
+
 
 type Tab = 'contacts' | 'dispatch' | 'responses';
 
@@ -115,6 +122,7 @@ function ContactsTab() {
   const [editGroup, setEditGroup] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
   const [directSendTarget, setDirectSendTarget] = useState<{ show: boolean; contact?: Contact | null }>({ show: false });
+  const [historyTarget, setHistoryTarget] = useState<Contact | null>(null);
 
   // Seleção e Operações em Massa
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -492,13 +500,14 @@ function ContactsTab() {
                 <th className="p-4 font-medium">Nome</th>
                 <th className="p-4 font-medium">Telefone</th>
                 <th className="p-4 font-medium">Grupo</th>
-                <th className="p-4 font-medium w-28 text-right">Ações</th>
+                <th className="p-4 font-medium">Histórico / Envios</th>
+                <th className="p-4 font-medium w-36 text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
               {contacts.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-muted">
+                  <td colSpan={6} className="p-8 text-center text-muted">
                     {loading ? 'Carregando...' : 'Nenhum contato encontrado. Importe seus contatos acima.'}
                   </td>
                 </tr>
@@ -553,6 +562,22 @@ function ContactsTab() {
                         )}
                       </td>
 
+                      {/* Histórico / Envios */}
+                      <td className="p-4">
+                        {c.sent_count && c.sent_count > 0 ? (
+                          <button
+                            onClick={() => setHistoryTarget(c)}
+                            title="Ver histórico de mensagens deste contato"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent text-xs font-medium transition-smooth cursor-pointer"
+                          >
+                            <History className="w-3.5 h-3.5" />
+                            <span>{c.sent_count} {c.sent_count === 1 ? 'mensagem' : 'mensagens'}</span>
+                          </button>
+                        ) : (
+                          <span className="text-muted text-xs italic">Nenhum envio</span>
+                        )}
+                      </td>
+
                       <td className="p-4 text-right">
                         {isEditing ? (
                           <div className="flex justify-end gap-1">
@@ -573,6 +598,13 @@ function ContactsTab() {
                           </div>
                         ) : (
                           <div className="flex justify-end gap-1">
+                            <button
+                              onClick={() => setHistoryTarget(c)}
+                              title="Ver Histórico Completo de Mensagens"
+                              className="p-1.5 rounded-lg hover:bg-info/15 text-muted hover:text-info transition-smooth cursor-pointer"
+                            >
+                              <History className="w-4 h-4" />
+                            </button>
                             <button
                               onClick={() => setDirectSendTarget({ show: true, contact: c })}
                               title="Enviar Mensagem Direta"
@@ -606,11 +638,21 @@ function ContactsTab() {
         </div>
       </div>
 
+      {/* Modal de Histórico de Mensagens */}
+      {historyTarget && (
+        <ContactHistoryModal
+          contact={historyTarget}
+          onClose={() => setHistoryTarget(null)}
+          onOpenDirectSend={(c) => setDirectSendTarget({ show: true, contact: c })}
+        />
+      )}
+
       {/* Modal de Envio Avulso */}
       {directSendTarget.show && (
         <DirectSendModal
           contact={directSendTarget.contact}
           onClose={() => setDirectSendTarget({ show: false, contact: null })}
+          onSuccess={() => fetchContacts()}
         />
       )}
 
@@ -625,6 +667,7 @@ function ContactsTab() {
         />
       )}
     </div>
+
   );
 }
 
@@ -634,11 +677,13 @@ function DispatchTab() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState('Todos');
   const [delayMin, setDelayMin] = useState(15);
   const [delayMax, setDelayMax] = useState(40);
   const [dispatching, setDispatching] = useState(false);
   const [dispatchResult, setDispatchResult] = useState('');
+  const [activeDispatchCampaign, setActiveDispatchCampaign] = useState<Campaign | null>(null);
 
   useEffect(() => {
     fetch('/api/groups')
@@ -658,19 +703,34 @@ function DispatchTab() {
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setMediaUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleCreateAndDispatch = async () => {
-    if (!title.trim() || !message.trim()) return;
+    if (!title.trim() || (!message.trim() && !mediaUrl)) return;
     setDispatching(true);
     setDispatchResult('');
 
     try {
-      // 1. Cria a campanha
+      // 1. Cria a campanha com ou sem mídia
       const campRes = await fetch('/api/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title,
           message_template: message,
+          media_url: mediaUrl,
+          media_type: mediaUrl ? 'image' : null,
           group_filter: groupFilter,
           delay_min: delayMin,
           delay_max: delayMax,
@@ -684,27 +744,32 @@ function DispatchTab() {
         return;
       }
 
-      setDispatchResult(`Campanha criada! Disparando para ${campaign.total_targets} contatos...`);
-
-      // 2. Inicia o disparo (async — pode demorar)
-      const dispatchRes = await fetch('/api/dispatch', {
+      // 2. Inicializa os logs pendentes da campanha no Supabase
+      const initRes = await fetch('/api/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign_id: campaign.id }),
+        body: JSON.stringify({ campaign_id: campaign.id, action: 'init' }),
       });
-      const result = await dispatchRes.json();
+      const initData = await initRes.json();
 
-      if (result.success) {
-        setDispatchResult(
-          `✅ Disparo finalizado! ${result.sent} enviados, ${result.failed} erros de ${result.total} contatos.`
-        );
-      } else {
-        setDispatchResult('❌ Erro no disparo: ' + (result.error || ''));
+      if (!initData.success) {
+        setDispatchResult('Erro ao preparar contatos: ' + (initData.error || ''));
+        setDispatching(false);
+        return;
       }
 
+      // Limpa os campos
       setTitle('');
       setMessage('');
+      setMediaUrl(null);
       fetchCampaigns();
+
+      // 3. Abre o modal de disparo ao vivo e resiliente
+      setActiveDispatchCampaign({
+        ...campaign,
+        total_targets: initData.total || campaign.total_targets,
+        status: 'running',
+      });
     } catch (err) {
       setDispatchResult('Erro: ' + (err instanceof Error ? err.message : 'Desconhecido'));
     }
@@ -717,18 +782,18 @@ function DispatchTab() {
       <div className="glass-card rounded-2xl p-5 space-y-4">
         <h3 className="text-sm font-semibold flex items-center gap-2">
           <Rocket className="w-4 h-4 text-accent" />
-          Novo Disparo
+          Novo Disparo Inteligente
         </h3>
 
         <input
-          placeholder="Título da campanha (ex: Promoção Agosto)"
+          placeholder="Título da campanha (ex: Promoção Especial de Agosto)"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
 
         <div className="relative">
           <textarea
-            placeholder={"Mensagem para enviar.\nUse {{primeiro_nome}} para usar apenas o primeiro nome.\n\nEx: Olá {{primeiro_nome}}, tudo bem?"}
+            placeholder={"Mensagem para enviar.\nUse {{primeiro_nome}} para usar apenas o primeiro nome do contato.\n\nEx: Olá {{primeiro_nome}}, preparei uma novidade para você!"}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             rows={4}
@@ -736,6 +801,51 @@ function DispatchTab() {
           <div className="absolute bottom-2 right-2 text-xs text-muted">
             Variáveis: {"{{primeiro_nome}}"} {"{{nome}}"} {"{{grupo}}"} {"{{telefone}}"}
           </div>
+        </div>
+
+        {/* Upload de Foto / Imagem para o Disparo */}
+        <div>
+          <label className="block text-xs font-semibold text-muted mb-1.5 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <ImageIcon className="w-3.5 h-3.5 text-accent" />
+              Anexar Foto / Imagem ao Disparo (opcional)
+            </span>
+            {mediaUrl && (
+              <button
+                type="button"
+                onClick={() => setMediaUrl(null)}
+                className="text-danger hover:underline text-xs flex items-center gap-1 cursor-pointer"
+              >
+                <Trash2 className="w-3 h-3" /> Remover Foto
+              </button>
+            )}
+          </label>
+
+          {mediaUrl ? (
+            <div className="relative rounded-xl border border-accent/30 bg-accent/5 p-3 flex items-center gap-4">
+              <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/80 shrink-0 bg-black/40">
+                <img src={mediaUrl} alt="Preview do Disparo" className="w-full h-full object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-foreground">Foto anexada ao disparo</p>
+                <p className="text-[11px] text-muted mt-0.5">
+                  Cada contato receberá esta imagem com o texto personalizado acima como legenda (caption).
+                </p>
+              </div>
+            </div>
+          ) : (
+            <label className="border-2 border-dashed border-border/80 hover:border-accent/50 rounded-xl p-4 text-center cursor-pointer transition-smooth bg-surface/30 hover:bg-surface/60 block">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <ImageIcon className="w-6 h-6 mx-auto text-muted mb-1" />
+              <p className="text-xs font-medium text-foreground">Clique para escolher uma foto (JPG, PNG, WEBP)</p>
+              <p className="text-[11px] text-muted mt-0.5">A foto será disparada com o texto da campanha</p>
+            </label>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -770,18 +880,18 @@ function DispatchTab() {
 
         <button
           onClick={handleCreateAndDispatch}
-          disabled={dispatching || !title.trim() || !message.trim()}
+          disabled={dispatching || !title.trim() || (!message.trim() && !mediaUrl)}
           className="btn btn-primary w-full"
         >
           {dispatching ? (
             <>
               <RefreshCw className="w-4 h-4 animate-spin" />
-              Disparando...
+              Preparando Disparo...
             </>
           ) : (
             <>
               <Send className="w-4 h-4" />
-              Criar e Disparar
+              Criar e Iniciar Disparo
             </>
           )}
         </button>
@@ -817,56 +927,93 @@ function DispatchTab() {
           <p className="text-muted text-sm text-center py-6">Nenhuma campanha criada ainda.</p>
         ) : (
           <div className="space-y-3">
-            {campaigns.map((c) => (
-              <div
-                key={c.id}
-                className={`p-4 rounded-xl border border-border/50 bg-surface/50 hover:bg-card-hover transition-smooth ${
-                  c.status === 'running' ? 'pulse-active' : ''
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-sm">{c.title}</span>
-                  <span className={`badge badge-${c.status}`}>{c.status}</span>
-                </div>
-                <div className="flex gap-4 text-xs text-muted">
-                  <span className="flex items-center gap-1">
-                    <Users className="w-3 h-3" />
-                    {c.total_targets} alvos
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3 text-accent" />
-                    {c.sent_count} enviados
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <XCircle className="w-3 h-3 text-danger" />
-                    {c.failed_count} erros
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <MessageCircle className="w-3 h-3 text-info" />
-                    {c.responded_count} respostas
-                  </span>
-                </div>
-                {/* Progress bar */}
-                {c.total_targets > 0 && (
-                  <div className="mt-3 h-1.5 rounded-full bg-border overflow-hidden">
-                    <div
-                      className="h-full bg-accent rounded-full transition-all duration-500"
-                      style={{
-                        width: `${Math.round(((c.sent_count + c.failed_count) / c.total_targets) * 100)}%`,
-                      }}
-                    />
+            {campaigns.map((c) => {
+              const isUnfinished = c.status === 'running' || c.status === 'paused';
+
+              return (
+                <div
+                  key={c.id}
+                  className={`p-4 rounded-xl border border-border/50 bg-surface/50 hover:bg-card-hover transition-smooth ${
+                    c.status === 'running' ? 'pulse-active' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">{c.title}</span>
+                      {c.media_url && (
+                        <span className="badge badge-info text-[10px] py-0.5 flex items-center gap-1">
+                          <ImageIcon className="w-3 h-3" /> Foto
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`badge badge-${c.status}`}>
+                        {c.status === 'running' ? 'Em Disparo' : c.status === 'paused' ? 'Pausado' : c.status === 'completed' ? 'Finalizado' : c.status}
+                      </span>
+
+                      {/* Botão para Retomar/Continuar Disparos Interrompidos */}
+                      {isUnfinished && (
+                        <button
+                          onClick={() => setActiveDispatchCampaign(c)}
+                          className="btn btn-primary btn-sm flex items-center gap-1 py-1 px-2.5 text-xs"
+                          title="Abrir painel e continuar o disparo deste ponto"
+                        >
+                          <Play className="w-3 h-3" />
+                          Continuar Disparo
+                        </button>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+                  <div className="flex gap-4 text-xs text-muted">
+                    <span className="flex items-center gap-1">
+                      <Users className="w-3 h-3" />
+                      {c.total_targets} alvos
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3 text-accent" />
+                      {c.sent_count} enviados
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <XCircle className="w-3 h-3 text-danger" />
+                      {c.failed_count} erros
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <MessageCircle className="w-3 h-3 text-info" />
+                      {c.responded_count} respostas
+                    </span>
+                  </div>
+                  {/* Progress bar */}
+                  {c.total_targets > 0 && (
+                    <div className="mt-3 h-1.5 rounded-full bg-border overflow-hidden">
+                      <div
+                        className="h-full bg-accent rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.round(((c.sent_count + c.failed_count) / c.total_targets) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* Modal de Disparo Ativo em Tempo Real */}
+      {activeDispatchCampaign && (
+        <ActiveDispatchModal
+          campaign={activeDispatchCampaign}
+          onClose={() => setActiveDispatchCampaign(null)}
+          onCampaignUpdated={fetchCampaigns}
+        />
+      )}
     </div>
   );
 }
 
 /* ===================== RESPOSTAS ===================== */
+
 function ResponsesTab() {
   const [logs, setLogs] = useState<CampaignLog[]>([]);
   const [loading, setLoading] = useState(false);

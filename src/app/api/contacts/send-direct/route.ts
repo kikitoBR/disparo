@@ -6,14 +6,34 @@ const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evo.kikito.si
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || 'teste';
 
-// POST /api/contacts/send-direct — Envia mensagem avulsa direta para um contato ou número
+function getMimeType(media: string): string {
+  if (media.startsWith('data:image/png')) return 'image/png';
+  if (media.startsWith('data:image/webp')) return 'image/webp';
+  if (media.startsWith('data:image/gif')) return 'image/gif';
+  if (media.endsWith('.png')) return 'image/png';
+  if (media.endsWith('.webp')) return 'image/webp';
+  if (media.endsWith('.gif')) return 'image/gif';
+  return 'image/jpeg';
+}
+
+function cleanBase64(media: string): string {
+  if (media.startsWith('data:')) {
+    const parts = media.split(',');
+    if (parts.length > 1) {
+      return parts[1];
+    }
+  }
+  return media;
+}
+
+// POST /api/contacts/send-direct — Envia mensagem avulsa direta com suporte a texto e foto
 export async function POST(request: NextRequest) {
   try {
-    const { phone, message, contact_id, contact_name } = await request.json();
+    const { phone, message, contact_id, contact_name, media_url } = await request.json();
 
-    if (!phone || !message) {
+    if (!phone || (!message && !media_url)) {
       return NextResponse.json(
-        { error: 'Telefone e mensagem são obrigatórios.' },
+        { error: 'Telefone e mensagem ou foto são obrigatórios.' },
         { status: 400 }
       );
     }
@@ -26,15 +46,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Se temos o contact_id ou contact_name, preenche as variáveis
+    // Identifica o contato no Supabase se não foi passado o ID
+    let targetContactId = contact_id || null;
     let name = contact_name || '';
-    if (!name && contact_id) {
-      const { data } = await supabase
+
+    if (!targetContactId || !name) {
+      const { data: foundContact } = await supabase
         .from('contacts')
-        .select('name')
-        .eq('id', contact_id)
-        .single();
-      if (data?.name) name = data.name;
+        .select('id, name')
+        .eq('phone_e164', normalizedPhone)
+        .maybeSingle();
+
+      if (foundContact) {
+        if (!targetContactId) targetContactId = foundContact.id;
+        if (!name) name = foundContact.name;
+      }
     }
 
     const fullName = (name || '').trim();
@@ -47,46 +73,92 @@ export async function POST(request: NextRequest) {
       telefone: normalizedPhone,
     };
 
-    const renderedMessage = renderTemplate(message, variables);
+    const renderedMessage = renderTemplate(message || '', variables);
 
-    // Chamada direta para a Evolution API
-    const evolutionRes = await fetch(
-      `${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: EVOLUTION_API_KEY,
-        },
-        body: JSON.stringify({
-          number: normalizedPhone,
-          text: renderedMessage,
-        }),
-      }
-    );
+    // Chamada para a Evolution API
+    let evolutionRes: Response;
+
+    if (media_url) {
+      const mimeType = getMimeType(media_url);
+      const isUrl = media_url.startsWith('http://') || media_url.startsWith('https://');
+      const mediaPayload = isUrl ? media_url : cleanBase64(media_url);
+
+      evolutionRes = await fetch(
+        `${EVOLUTION_API_URL}/message/sendMedia/${EVOLUTION_INSTANCE}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: EVOLUTION_API_KEY,
+          },
+          body: JSON.stringify({
+            number: normalizedPhone,
+            mediatype: 'image',
+            mimetype: mimeType,
+            caption: renderedMessage,
+            media: mediaPayload,
+            fileName: 'imagem.jpg',
+          }),
+        }
+      );
+    } else {
+      evolutionRes = await fetch(
+        `${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: EVOLUTION_API_KEY,
+          },
+          body: JSON.stringify({
+            number: normalizedPhone,
+            text: renderedMessage,
+          }),
+        }
+      );
+    }
 
     if (!evolutionRes.ok) {
       const errData = await evolutionRes.json().catch(() => ({}));
+      const errMessage =
+        errData?.response?.message ||
+        errData?.message ||
+        `Erro ao enviar via Evolution API (status ${evolutionRes.status})`;
+
+      // Registrar o erro no log
+      const logErrorEntry: Record<string, unknown> = {
+        contact_id: targetContactId,
+        phone_e164: normalizedPhone,
+        rendered_message: renderedMessage,
+        status: 'failed',
+        last_error: typeof errMessage === 'object' ? JSON.stringify(errMessage) : String(errMessage),
+        sent_at: new Date().toISOString(),
+      };
+      await supabase.from('campaign_logs').insert(logErrorEntry);
+
       return NextResponse.json(
-        {
-          error:
-            errData?.response?.message ||
-            errData?.message ||
-            `Erro ao enviar via Evolution API (status ${evolutionRes.status})`,
-        },
+        { error: typeof errMessage === 'object' ? JSON.stringify(errMessage) : errMessage },
         { status: 400 }
       );
     }
 
-    // Registrar o envio avulso nos logs se tivermos contact_id
-    if (contact_id) {
-      await supabase.from('campaign_logs').insert({
-        contact_id,
-        phone_e164: normalizedPhone,
-        rendered_message: renderedMessage,
-        status: 'sent',
-        sent_at: new Date().toISOString(),
-      });
+    // Registrar o envio com sucesso nos logs
+    const logPayload: Record<string, unknown> = {
+      contact_id: targetContactId,
+      phone_e164: normalizedPhone,
+      rendered_message: renderedMessage,
+      status: 'sent',
+      sent_at: new Date().toISOString(),
+    };
+
+    if (media_url) {
+      logPayload.media_url = media_url;
+    }
+
+    const { error: logInsertError } = await supabase.from('campaign_logs').insert(logPayload);
+    if (logInsertError && logInsertError.message?.includes('media_url')) {
+      delete logPayload.media_url;
+      await supabase.from('campaign_logs').insert(logPayload);
     }
 
     return NextResponse.json({

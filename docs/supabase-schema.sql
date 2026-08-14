@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title VARCHAR(255) NOT NULL,
   message_template TEXT NOT NULL,
+  media_url TEXT,
+  media_type VARCHAR(50) DEFAULT 'image',
   group_filter VARCHAR(100),
   delay_min INTEGER DEFAULT 15,
   delay_max INTEGER DEFAULT 40,
@@ -36,12 +38,19 @@ CREATE TABLE IF NOT EXISTS campaign_logs (
   contact_id UUID REFERENCES contacts(id) ON DELETE CASCADE,
   phone_e164 VARCHAR(20) NOT NULL,
   rendered_message TEXT NOT NULL,
+  media_url TEXT,
   status VARCHAR(50) DEFAULT 'pending',
   sent_at TIMESTAMPTZ,
   response_at TIMESTAMPTZ,
   response_text TEXT,
   last_error TEXT
 );
+
+-- Migração rápida para bancos já criados:
+-- ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS media_url TEXT;
+-- ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS media_type VARCHAR(50) DEFAULT 'image';
+-- ALTER TABLE campaign_logs ADD COLUMN IF NOT EXISTS media_url TEXT;
+
 
 -- 4. Mensagens recebidas (inbound)
 CREATE TABLE IF NOT EXISTS inbound_messages (

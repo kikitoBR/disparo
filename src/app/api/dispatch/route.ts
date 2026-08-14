@@ -2,169 +2,161 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { renderTemplate } from '@/lib/utils';
 
-const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evo.kikito.site';
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
-const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || 'teste';
-
-// POST /api/dispatch — Executa o disparo de uma campanha
+// POST /api/dispatch — Inicializa, pausa, retoma ou cancela o disparo de uma campanha
 export async function POST(request: NextRequest) {
-  const { campaign_id } = await request.json();
+  try {
+    const body = await request.json();
+    const { campaign_id, action = 'init' } = body;
 
-  if (!campaign_id) {
-    return NextResponse.json({ error: 'campaign_id é obrigatório.' }, { status: 400 });
-  }
+    if (!campaign_id) {
+      return NextResponse.json({ error: 'campaign_id é obrigatório.' }, { status: 400 });
+    }
 
-  // Busca a campanha
-  const { data: campaign, error: campError } = await supabase
-    .from('campaigns')
-    .select('*')
-    .eq('id', campaign_id)
-    .single();
-
-  if (campError || !campaign) {
-    return NextResponse.json({ error: 'Campanha não encontrada.' }, { status: 404 });
-  }
-
-  // Busca os contatos alvo
-  let query = supabase.from('contacts').select('*').eq('status', 'active');
-  if (campaign.group_filter && campaign.group_filter !== 'Todos') {
-    query = query.eq('group_name', campaign.group_filter);
-  }
-  const { data: contacts, error: contactsError } = await query;
-
-  if (contactsError || !contacts || contacts.length === 0) {
-    return NextResponse.json({ error: 'Nenhum contato encontrado para o filtro.' }, { status: 400 });
-  }
-
-  // Marca a campanha como running
-  await supabase
-    .from('campaigns')
-    .update({ status: 'running', total_targets: contacts.length })
-    .eq('id', campaign_id);
-
-  // Cria os logs pendentes
-  const logs = contacts.map((contact) => {
-    const fullName = (contact.name || '').trim();
-    const firstName = fullName ? fullName.split(/\s+/)[0] : '';
-
-    const variables: Record<string, string> = {
-      nome: fullName,
-      primeiro_nome: firstName,
-      primeironome: firstName,
-      telefone: contact.phone_e164,
-      grupo: contact.group_name || '',
-      ...(contact.custom_fields || {}),
-    };
-    return {
-      campaign_id,
-      contact_id: contact.id,
-      phone_e164: contact.phone_e164,
-      rendered_message: renderTemplate(campaign.message_template, variables),
-      status: 'pending',
-    };
-  });
-
-  await supabase.from('campaign_logs').insert(logs);
-
-  // Disparo sequencial com delays aleatórios
-  let sentCount = 0;
-  let failedCount = 0;
-
-  for (const log of logs) {
-    // Delay aleatório entre envios
-    const delay = Math.floor(
-      Math.random() * (campaign.delay_max - campaign.delay_min + 1) + campaign.delay_min
-    );
-    await new Promise((resolve) => setTimeout(resolve, delay * 1000));
-
-    // Verifica se a campanha foi pausada
-    const { data: currentCampaign } = await supabase
+    // Busca a campanha
+    const { data: campaign, error: campError } = await supabase
       .from('campaigns')
-      .select('status')
+      .select('*')
       .eq('id', campaign_id)
       .single();
 
-    if (currentCampaign?.status === 'paused') {
-      // Cancela os pendentes
+    if (campError || !campaign) {
+      return NextResponse.json({ error: 'Campanha não encontrada.' }, { status: 404 });
+    }
+
+    // Ações de controle: Pause, Resume, Cancel
+    if (action === 'pause') {
+      await supabase
+        .from('campaigns')
+        .update({ status: 'paused' })
+        .eq('id', campaign_id);
+      return NextResponse.json({ success: true, status: 'paused' });
+    }
+
+    if (action === 'resume') {
+      await supabase
+        .from('campaigns')
+        .update({ status: 'running' })
+        .eq('id', campaign_id);
+      return NextResponse.json({ success: true, status: 'running' });
+    }
+
+    if (action === 'cancel') {
+      await supabase
+        .from('campaigns')
+        .update({ status: 'cancelled' })
+        .eq('id', campaign_id);
+
       await supabase
         .from('campaign_logs')
         .update({ status: 'cancelled' })
         .eq('campaign_id', campaign_id)
         .eq('status', 'pending');
-      break;
+
+      return NextResponse.json({ success: true, status: 'cancelled' });
     }
 
-    // Envia via Evolution API
-    try {
-      const response = await fetch(
-        `${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: EVOLUTION_API_KEY,
-          },
-          body: JSON.stringify({
-            number: log.phone_e164,
-            text: log.rendered_message,
-          }),
-        }
-      );
+    // Ação Padrão: Inicializar a campanha para disparo
+    // 1. Verifica se já existem logs criados para esta campanha
+    const { data: existingLogs } = await supabase
+      .from('campaign_logs')
+      .select('id, status')
+      .eq('campaign_id', campaign_id);
 
-      if (response.ok) {
-        sentCount++;
-        await supabase
-          .from('campaign_logs')
-          .update({ status: 'sent', sent_at: new Date().toISOString() })
-          .eq('campaign_id', campaign_id)
-          .eq('contact_id', log.contact_id);
-
-        await supabase
-          .from('campaigns')
-          .update({ sent_count: sentCount })
-          .eq('id', campaign_id);
-      } else {
-        failedCount++;
-        const errorText = await response.text();
-        await supabase
-          .from('campaign_logs')
-          .update({ status: 'failed', last_error: errorText })
-          .eq('campaign_id', campaign_id)
-          .eq('contact_id', log.contact_id);
-
-        await supabase
-          .from('campaigns')
-          .update({ failed_count: failedCount })
-          .eq('id', campaign_id);
-      }
-    } catch (err) {
-      failedCount++;
-      await supabase
-        .from('campaign_logs')
-        .update({
-          status: 'failed',
-          last_error: err instanceof Error ? err.message : 'Erro desconhecido',
-        })
-        .eq('campaign_id', campaign_id)
-        .eq('contact_id', log.contact_id);
-
+    if (existingLogs && existingLogs.length > 0) {
+      const pendingCount = existingLogs.filter((l) => l.status === 'pending').length;
       await supabase
         .from('campaigns')
-        .update({ failed_count: failedCount })
+        .update({ status: 'running' })
         .eq('id', campaign_id);
+
+      return NextResponse.json({
+        success: true,
+        campaign_id,
+        alreadyInitialized: true,
+        total: existingLogs.length,
+        pending: pendingCount,
+        sent: campaign.sent_count || 0,
+        failed: campaign.failed_count || 0,
+      });
     }
+
+    // 2. Se não existem logs, busca os contatos alvo
+    let query = supabase.from('contacts').select('*').eq('status', 'active');
+    if (campaign.group_filter && campaign.group_filter !== 'Todos') {
+      query = query.eq('group_name', campaign.group_filter);
+    }
+    const { data: contacts, error: contactsError } = await query;
+
+    if (contactsError || !contacts || contacts.length === 0) {
+      return NextResponse.json(
+        { error: 'Nenhum contato encontrado para o grupo selecionado.' },
+        { status: 400 }
+      );
+    }
+
+    // 3. Marca a campanha como running e total_targets
+    await supabase
+      .from('campaigns')
+      .update({ status: 'running', total_targets: contacts.length })
+      .eq('id', campaign_id);
+
+    // 4. Cria os logs pendentes para cada contato
+    const logs = contacts.map((contact) => {
+      const fullName = (contact.name || '').trim();
+      const firstName = fullName ? fullName.split(/\s+/)[0] : '';
+
+      const variables: Record<string, string> = {
+        nome: fullName,
+        primeiro_nome: firstName,
+        primeironome: firstName,
+        telefone: contact.phone_e164,
+        grupo: contact.group_name || '',
+        ...(contact.custom_fields || {}),
+      };
+
+      const rendered = renderTemplate(campaign.message_template || '', variables);
+
+      const logItem: Record<string, unknown> = {
+        campaign_id,
+        contact_id: contact.id,
+        phone_e164: contact.phone_e164,
+        rendered_message: rendered,
+        status: 'pending',
+      };
+
+      if (campaign.media_url) {
+        logItem.media_url = campaign.media_url;
+      }
+
+      return logItem;
+    });
+
+    // Insere logs em batches de 100
+    for (let i = 0; i < logs.length; i += 100) {
+      const batch = logs.slice(i, i + 100);
+      const { error: insertError } = await supabase.from('campaign_logs').insert(batch);
+      if (insertError && insertError.message?.includes('media_url')) {
+        // Fallback se a coluna media_url não existir na tabela campaign_logs
+        const cleanedBatch = batch.map((item) => {
+          const { media_url, ...rest } = item;
+          return rest;
+        });
+        await supabase.from('campaign_logs').insert(cleanedBatch);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      campaign_id,
+      total: contacts.length,
+      pending: contacts.length,
+      sent: 0,
+      failed: 0,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Erro ao inicializar disparo.' },
+      { status: 500 }
+    );
   }
-
-  // Marca campanha como completa
-  await supabase
-    .from('campaigns')
-    .update({ status: 'completed' })
-    .eq('id', campaign_id);
-
-  return NextResponse.json({
-    success: true,
-    sent: sentCount,
-    failed: failedCount,
-    total: contacts.length,
-  });
 }
