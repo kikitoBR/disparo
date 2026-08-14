@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { extractMediaTemplate } from '@/lib/utils';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evo.kikito.site';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
@@ -16,7 +17,6 @@ function getMimeType(media: string): string {
 }
 
 function cleanBase64(media: string): string {
-  // If it's a data url, extract the raw base64 or pass clean string
   if (media.startsWith('data:')) {
     const parts = media.split(',');
     if (parts.length > 1) {
@@ -99,8 +99,13 @@ export async function POST(request: NextRequest) {
       if (contact?.name) contactName = contact.name;
     }
 
-    // Determina se há mídia para enviar
-    const media = campaign.media_url || log.media_url || null;
+    // Extrai mensagem e mídia do log ou da campanha
+    const { message: logMessage, mediaUrl: logMedia } = extractMediaTemplate(log.rendered_message || '');
+    const { message: campMessage, mediaUrl: campMedia } = extractMediaTemplate(campaign.message_template || '');
+    
+    const media = log.media_url || logMedia || campaign.media_url || campMedia || null;
+    const messageToSend = logMessage || campMessage || '';
+
     let isSuccess = false;
     let errorMessage: string | null = null;
 
@@ -125,7 +130,7 @@ export async function POST(request: NextRequest) {
               number: log.phone_e164,
               mediatype: 'image',
               mimetype: mimeType,
-              caption: log.rendered_message || '',
+              caption: messageToSend,
               media: mediaPayload,
               fileName: 'imagem.jpg',
             }),
@@ -143,7 +148,7 @@ export async function POST(request: NextRequest) {
             },
             body: JSON.stringify({
               number: log.phone_e164,
-              text: log.rendered_message,
+              text: messageToSend,
             }),
           }
         );
@@ -172,6 +177,7 @@ export async function POST(request: NextRequest) {
         .update({
           status: 'sent',
           sent_at: nowIso,
+          rendered_message: messageToSend, // Salva o texto limpo
           last_error: null,
         })
         .eq('id', log.id);

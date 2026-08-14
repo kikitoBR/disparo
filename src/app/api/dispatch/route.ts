@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { renderTemplate } from '@/lib/utils';
+import { renderTemplate, extractMediaTemplate, encodeMediaTemplate } from '@/lib/utils';
 
 // POST /api/dispatch — Inicializa, pausa, retoma ou cancela o disparo de uma campanha
 export async function POST(request: NextRequest) {
@@ -94,6 +94,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Extrai mensagem e mídia
+    const { message: cleanTemplate, mediaUrl } = extractMediaTemplate(campaign.message_template || '');
+    const finalMedia = campaign.media_url || mediaUrl;
+
     // 3. Marca a campanha como running e total_targets
     await supabase
       .from('campaigns')
@@ -114,35 +118,22 @@ export async function POST(request: NextRequest) {
         ...(contact.custom_fields || {}),
       };
 
-      const rendered = renderTemplate(campaign.message_template || '', variables);
+      const rendered = renderTemplate(cleanTemplate, variables);
+      const encodedRendered = encodeMediaTemplate(rendered, finalMedia);
 
-      const logItem: Record<string, unknown> = {
+      return {
         campaign_id,
         contact_id: contact.id,
         phone_e164: contact.phone_e164,
-        rendered_message: rendered,
+        rendered_message: encodedRendered,
         status: 'pending',
       };
-
-      if (campaign.media_url) {
-        logItem.media_url = campaign.media_url;
-      }
-
-      return logItem;
     });
 
     // Insere logs em batches de 100
     for (let i = 0; i < logs.length; i += 100) {
       const batch = logs.slice(i, i + 100);
-      const { error: insertError } = await supabase.from('campaign_logs').insert(batch);
-      if (insertError && insertError.message?.includes('media_url')) {
-        // Fallback se a coluna media_url não existir na tabela campaign_logs
-        const cleanedBatch = batch.map((item) => {
-          const { media_url, ...rest } = item;
-          return rest;
-        });
-        await supabase.from('campaign_logs').insert(cleanedBatch);
-      }
+      await supabase.from('campaign_logs').insert(batch);
     }
 
     return NextResponse.json({

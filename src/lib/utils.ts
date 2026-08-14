@@ -116,3 +116,32 @@ export function renderTemplate(template: string, variables: Record<string, strin
     return variables[key] || '';
   });
 }
+
+/**
+ * Codifica mídia opcional no template para compatibilidade universal com o banco de dados
+ */
+export function encodeMediaTemplate(template: string, mediaUrl?: string | null): string {
+  if (!mediaUrl) return template || '';
+  return `[MEDIA:${mediaUrl}]\n${template || ''}`;
+}
+
+/**
+ * Extrai mídia e template limpo de uma mensagem potencialmente codificada
+ */
+export function extractMediaTemplate(rawText: string): { message: string; mediaUrl: string | null } {
+  if (!rawText) return { message: '', mediaUrl: null };
+  if (rawText.startsWith('[MEDIA:')) {
+    const endIdx = rawText.indexOf(']\n');
+    if (endIdx !== -1) {
+      const mediaUrl = rawText.substring(7, endIdx);
+      const message = rawText.substring(endIdx + 2);
+      return { message, mediaUrl };
+    }
+    if (rawText.endsWith(']')) {
+      const mediaUrl = rawText.substring(7, rawText.length - 1);
+      return { message: '', mediaUrl };
+    }
+  }
+  return { message: rawText, mediaUrl: null };
+}
+
