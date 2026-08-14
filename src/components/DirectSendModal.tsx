@@ -160,7 +160,7 @@ export function DirectSendModal({ contact, initialPhone = '', onClose, onSuccess
               >
                 <span className="flex items-center gap-2">
                   <Clock className="w-3.5 h-3.5 text-accent" />
-                  Histórico de mensagens com este contato ({history.length})
+                  Últimos disparos realizados para este contato ({history.length})
                 </span>
                 {showHistory ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
@@ -170,23 +170,20 @@ export function DirectSendModal({ contact, initialPhone = '', onClose, onSuccess
                   {history.slice(0, 5).map((item) => (
                     <div
                       key={item.id}
-                      className={`p-2.5 rounded-lg border ${
-                        item.type === 'sent'
-                          ? 'bg-accent/10 border-accent/20 ml-4'
-                          : 'bg-surface border-border mr-4'
-                      }`}
+                      className="p-2.5 rounded-lg border bg-accent/10 border-accent/20"
                     >
                       <div className="flex items-center justify-between text-[10px] text-muted mb-1">
-                        <span>{item.type === 'sent' ? `📤 ${item.campaign_title || 'Enviada'}` : '📥 Resposta'}</span>
-                        <span>{new Date(item.timestamp).toLocaleString('pt-BR')}</span>
+                        <span className="text-accent font-semibold">📤 {item.campaign_title || 'Disparo'}</span>
+                        <span className="font-mono">{new Date(item.timestamp).toLocaleString('pt-BR')}</span>
                       </div>
-                      <p className="line-clamp-2">{item.text}</p>
+                      <p className="line-clamp-2 text-foreground">{item.text}</p>
                     </div>
                   ))}
                 </div>
               )}
             </div>
           )}
+
 
           {/* Mensagem de Texto */}
           <div>
