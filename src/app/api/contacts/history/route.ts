@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { normalizePhone } from '@/lib/utils';
+import { normalizePhone, extractMediaTemplate } from '@/lib/utils';
 import type { ContactMessageHistoryItem } from '@/lib/types';
 
 // GET /api/contacts/history?contact_id=xxx&phone=yyy — Busca apenas os disparos realizados para o contato
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     // 2. Busca APENAS os disparos realizados nos logs (campaign_logs)
     let logsQuery = supabase
       .from('campaign_logs')
-      .select('id, campaign_id, contact_id, phone_e164, rendered_message, media_url, status, sent_at, response_at, response_text, last_error')
+      .select('id, campaign_id, contact_id, phone_e164, rendered_message, status, sent_at, response_at, response_text, last_error')
       .order('sent_at', { ascending: false });
 
     if (contactId && phone) {
@@ -80,16 +80,19 @@ export async function GET(request: NextRequest) {
     }
 
     // 3. Monta a lista filtrando exclusivamente os disparos realizados
-    const history: ContactMessageHistoryItem[] = (sentLogs || []).map((log) => ({
-      id: log.id,
-      type: 'sent',
-      text: log.rendered_message,
-      media_url: log.media_url || null,
-      status: log.status,
-      timestamp: log.sent_at || log.response_at || new Date().toISOString(),
-      campaign_title: log.campaign_id ? campaignsMap[log.campaign_id] || 'Campanha' : 'Envio Avulso',
-      error: log.last_error,
-    }));
+    const history: ContactMessageHistoryItem[] = (sentLogs || []).map((log) => {
+      const { message, mediaUrl } = extractMediaTemplate(log.rendered_message || '');
+      return {
+        id: log.id,
+        type: 'sent',
+        text: message,
+        media_url: mediaUrl,
+        status: log.status,
+        timestamp: log.sent_at || log.response_at || new Date().toISOString(),
+        campaign_title: log.campaign_id ? campaignsMap[log.campaign_id] || 'Campanha' : 'Envio Avulso',
+        error: log.last_error,
+      };
+    });
 
     // Ordena do mais recente para o mais antigo
     history.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());

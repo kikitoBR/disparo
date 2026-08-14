@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { normalizePhone, renderTemplate } from '@/lib/utils';
+import { normalizePhone, renderTemplate, encodeMediaTemplate } from '@/lib/utils';
+
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evo.kikito.site';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
@@ -146,20 +147,13 @@ export async function POST(request: NextRequest) {
     const logPayload: Record<string, unknown> = {
       contact_id: targetContactId,
       phone_e164: normalizedPhone,
-      rendered_message: renderedMessage,
+      rendered_message: encodeMediaTemplate(renderedMessage, media_url),
       status: 'sent',
       sent_at: new Date().toISOString(),
     };
 
-    if (media_url) {
-      logPayload.media_url = media_url;
-    }
+    await supabase.from('campaign_logs').insert(logPayload);
 
-    const { error: logInsertError } = await supabase.from('campaign_logs').insert(logPayload);
-    if (logInsertError && logInsertError.message?.includes('media_url')) {
-      delete logPayload.media_url;
-      await supabase.from('campaign_logs').insert(logPayload);
-    }
 
     return NextResponse.json({
       success: true,
