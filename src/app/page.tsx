@@ -40,7 +40,20 @@ type Tab = 'contacts' | 'dispatch' | 'responses';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('contacts');
+  const [instanceStatus, setInstanceStatus] = useState<{
+    instanceName: string;
+    state: string;
+    connected: boolean;
+    message?: string;
+  } | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    fetch('/api/instance')
+      .then((r) => r.json())
+      .then((data) => setInstanceStatus(data))
+      .catch(() => {});
+  }, []);
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -62,15 +75,67 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <button
-          onClick={handleLogout}
-          title="Sair do painel"
-          className="btn btn-secondary btn-sm flex items-center gap-1.5"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          Sair
-        </button>
+        <div className="flex items-center gap-3">
+          {instanceStatus && (
+            <div
+              className={`text-xs px-3 py-1.5 rounded-xl border flex items-center gap-2 font-medium ${
+                instanceStatus.connected
+                  ? 'bg-accent/10 border-accent/20 text-accent'
+                  : 'bg-danger/10 border-danger/20 text-danger'
+              }`}
+              title={
+                instanceStatus.connected
+                  ? `Instância '${instanceStatus.instanceName}' conectada e pronta para disparos.`
+                  : `Instância '${instanceStatus.instanceName}' desconectada do WhatsApp.`
+              }
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  instanceStatus.connected ? 'bg-accent animate-pulse' : 'bg-danger'
+                }`}
+              />
+              <span>
+                {instanceStatus.connected
+                  ? `WhatsApp Conectado (${instanceStatus.instanceName})`
+                  : `WhatsApp Desconectado (${instanceStatus.instanceName})`}
+              </span>
+            </div>
+          )}
+
+          <button
+            onClick={handleLogout}
+            title="Sair do painel"
+            className="btn btn-secondary btn-sm flex items-center gap-1.5"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Sair
+          </button>
+        </div>
       </header>
+
+      {/* Alerta caso a instância esteja desconectada */}
+      {instanceStatus && !instanceStatus.connected && (
+        <div className="mx-4 mb-2 p-4 rounded-xl bg-danger/15 border border-danger/30 text-danger text-xs flex items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>
+              <strong>Atenção:</strong> A instância do WhatsApp <strong>'{instanceStatus.instanceName}'</strong> está desconectada (status: {instanceStatus.state}). Para realizar disparos, reconecte o WhatsApp escaneando o QR Code no painel da Evolution API.
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              fetch('/api/instance')
+                .then((r) => r.json())
+                .then((d) => setInstanceStatus(d));
+            }}
+            className="btn btn-secondary btn-sm text-xs shrink-0 flex items-center gap-1"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Verificar Conexão
+          </button>
+        </div>
+      )}
+
 
       {/* Tab Navigation */}
       <nav className="mx-4 mb-3 flex gap-1 glass-card rounded-xl p-1.5">

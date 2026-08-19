@@ -145,3 +145,34 @@ export function extractMediaTemplate(rawText: string): { message: string; mediaU
   return { message: rawText, mediaUrl: null };
 }
 
+/**
+ * Formata mensagens de erro brutas da Evolution API para mensagens claras e amigáveis em português
+ */
+export function formatEvolutionError(rawError: unknown, instanceName: string = 'WhatsApp'): string {
+  if (!rawError) return 'Erro desconhecido ao enviar mensagem.';
+
+  const str = typeof rawError === 'object' ? JSON.stringify(rawError) : String(rawError);
+
+  if (
+    str.includes('sendMessage') ||
+    str.includes('Cannot read properties of undefined') ||
+    str.includes('device_removed') ||
+    str.includes('conflict') ||
+    str.includes('Unauthorized') ||
+    str.includes('close')
+  ) {
+    return `⚠️ Instância '${instanceName}' desconectada do WhatsApp. Por favor, reconecte o WhatsApp no painel da Evolution API (escaneando o QR Code).`;
+  }
+
+  if (str.includes('exists') && str.includes('false')) {
+    return '❌ Este número de telefone não possui conta ativa no WhatsApp.';
+  }
+
+  if (str.includes('rate-overlimit') || str.includes('overlimit')) {
+    return '⏳ Limite de envio temporário atingido. Aguarde alguns instantes.';
+  }
+
+  return str;
+}
+
+

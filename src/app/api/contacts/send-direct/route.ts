@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { normalizePhone, renderTemplate, encodeMediaTemplate } from '@/lib/utils';
+import { normalizePhone, renderTemplate, encodeMediaTemplate, formatEvolutionError } from '@/lib/utils';
+
 
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evo.kikito.site';
@@ -121,10 +122,12 @@ export async function POST(request: NextRequest) {
 
     if (!evolutionRes.ok) {
       const errData = await evolutionRes.json().catch(() => ({}));
-      const errMessage =
+      const rawErrMsg =
         errData?.response?.message ||
         errData?.message ||
         `Erro ao enviar via Evolution API (status ${evolutionRes.status})`;
+
+      const formattedError = formatEvolutionError(rawErrMsg, EVOLUTION_INSTANCE);
 
       // Registrar o erro no log
       const logErrorEntry: Record<string, unknown> = {
@@ -132,16 +135,17 @@ export async function POST(request: NextRequest) {
         phone_e164: normalizedPhone,
         rendered_message: renderedMessage,
         status: 'failed',
-        last_error: typeof errMessage === 'object' ? JSON.stringify(errMessage) : String(errMessage),
+        last_error: formattedError,
         sent_at: new Date().toISOString(),
       };
       await supabase.from('campaign_logs').insert(logErrorEntry);
 
       return NextResponse.json(
-        { error: typeof errMessage === 'object' ? JSON.stringify(errMessage) : errMessage },
+        { error: formattedError },
         { status: 400 }
       );
     }
+
 
     // Registrar o envio com sucesso nos logs
     const logPayload: Record<string, unknown> = {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { extractMediaTemplate } from '@/lib/utils';
+import { extractMediaTemplate, formatEvolutionError } from '@/lib/utils';
+
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evo.kikito.site';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
@@ -159,11 +160,12 @@ export async function POST(request: NextRequest) {
       } else {
         const errJson = await response.json().catch(() => null);
         const errText = errJson?.response?.message || errJson?.message || (await response.text().catch(() => 'Erro desconhecido'));
-        errorMessage = typeof errText === 'object' ? JSON.stringify(errText) : String(errText);
+        errorMessage = formatEvolutionError(errText, EVOLUTION_INSTANCE);
       }
     } catch (err) {
       errorMessage = err instanceof Error ? err.message : 'Falha na conexão com a Evolution API';
     }
+
 
     // Atualiza contadores e status do log
     const nowIso = new Date().toISOString();
